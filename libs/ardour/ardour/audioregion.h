@@ -43,6 +43,8 @@ class PlaylistReadTest;
 
 namespace ARDOUR {
 
+class WarpMap;
+
 namespace Properties {
 	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> envelope_active;
 	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> default_fade_in;
@@ -108,6 +110,23 @@ class LIBARDOUR_API AudioRegion : public Region, public AudioReadable
 	std::shared_ptr<AutomationList> fade_out() { return _fade_out.val (); }
 	std::shared_ptr<AutomationList> inverse_fade_out()  { return _inverse_fade_out.val (); }
 	std::shared_ptr<AutomationList> envelope() { return _envelope.val (); }
+
+	/** Length of the unstretched audio this region reads from its master
+	 * sources: length_samples() / stretch(). Warp-marker source positions
+	 * are relative to the start of this range.
+	 */
+	samplecnt_t unstretched_length () const;
+
+	/** The warp markers this region was rendered with, or null.
+	 * Set by render_warp() and carried through later RubberBand stretches
+	 * and pitch shifts, which re-render from the original audio with the
+	 * markers applied. Exact copies keep it; splits and other derived
+	 * regions don't. A map whose source length no longer matches
+	 * unstretched_length() (e.g. after a trim) is ignored by renders.
+	 */
+	std::shared_ptr<WarpMap const> warp_map () const { return _warp_map; }
+	void set_warp_map (std::shared_ptr<WarpMap const> m) { _warp_map = m; }
+	bool warp_map_matches () const;
 
 	Temporal::Range body_range () const;
 
@@ -273,6 +292,8 @@ class LIBARDOUR_API AudioRegion : public Region, public AudioReadable
 	mutable samplepos_t _fx_pos;
 	pframes_t           _fx_block_size;
 	mutable bool        _fx_latent_read;
+
+	std::shared_ptr<WarpMap const> _warp_map;
 
 	mutable PBD::Mutex _read_lock;
 	mutable PBD::Mutex _cache_lock;

@@ -55,6 +55,7 @@
 #include "ardour/region_fx_plugin.h"
 #include "ardour/runtime_functions.h"
 #include "ardour/sndfilesource.h"
+#include "ardour/warp_map.h"
 #include "ardour/transient_detector.h"
 #include "ardour/parameter_descriptor.h"
 
@@ -352,6 +353,9 @@ AudioRegion::AudioRegion (std::shared_ptr<const AudioRegion> other)
 
 	copy_plugin_state (other);
 
+	/* an exact copy reads the same audio, so the same warp markers apply */
+	_warp_map = other->_warp_map;
+
 	assert(_type == DataType::AUDIO);
 	assert (_sources.size() == _master_sources.size());
 }
@@ -380,6 +384,13 @@ AudioRegion::AudioRegion (std::shared_ptr<const AudioRegion> other, timecnt_t co
 	_fx_latent_read = false;
 
 	copy_plugin_state (other);
+
+	/* RegionFactory makes plain copies through here with a zero offset.
+	 * Those read the same audio, so the warp markers still apply; a
+	 * non-zero offset (a split) reads different audio, so they don't. */
+	if (offset.is_zero ()) {
+		_warp_map = other->_warp_map;
+	}
 
 	assert(_type == DataType::AUDIO);
 	assert (_sources.size() == _master_sources.size());
@@ -1222,6 +1233,10 @@ AudioRegion::state () const
 		child->add_child_nocopy (_inverse_fade_out->get_state ());
 	}
 
+	if (_warp_map) {
+		node.add_child_nocopy (_warp_map->get_state ());
+	}
+
 	return node;
 }
 
@@ -1262,7 +1277,16 @@ AudioRegion::_set_state (const XMLNode& node, int version, PropertyChange& what_
 
 		child = (*niter);
 
-		if (child->name() == "Envelope") {
+		if (child->name() == WarpMap::xml_node_name) {
+
+			std::shared_ptr<WarpMap> m (new WarpMap);
+			if (m->set_state (*child) == 0) {
+				_warp_map = m;
+			} else {
+				warning << string_compose (_("Region \"%1\": ignoring invalid warp markers"), name ()) << endmsg;
+			}
+
+		} else if (child->name() == "Envelope") {
 
 			_envelope->clear ();
 
@@ -2782,4 +2806,18 @@ AudioRegion::ensure_length_sanity ()
 		*/
 		_length = timecnt_t (timepos_t (_length.val().samples()), _length.val().position());
 	}
+}
+
+samplecnt_t
+AudioRegion::unstretched_length () const
+{
+	/* same arithmetic as RBEffect::run(), so a map built from this
+	 * matches what the stretcher reads */
+	return samplecnt_t (length_samples () / (double)stretch ());
+}
+
+bool
+AudioRegion::warp_map_matches () const
+{
+	return _warp_map && _warp_map->source_length () == unstretched_length ();
 }

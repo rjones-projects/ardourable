@@ -36,6 +36,7 @@
 #include "ardour/session.h"
 #include "ardour/stretch.h"
 #include "ardour/types.h"
+#include "ardour/warp_map.h"
 
 #include "pbd/i18n.h"
 
@@ -156,6 +157,22 @@ RBEffect::run (std::shared_ptr<Region> r, Progress* progress)
 
 	samplecnt_t read_duration = samplecnt_t (region->length_samples () / (double)region->stretch ());
 
+	/* Warp markers. An explicit map in the request wins. Otherwise, if
+	 * the region was rendered with warp markers that still match the
+	 * audio it reads, keep them: we re-render from the original audio,
+	 * so without them a stretch or pitch shift would silently flatten
+	 * the warp. The map is rescaled to the new output length.
+	 */
+	samplecnt_t const          output_length = region->length ().scale (tsr.time_fraction).samples ();
+	std::map<size_t, size_t>   key_frames (tsr.key_frames);
+	std::shared_ptr<WarpMap>   carried_warp;
+
+	if (key_frames.empty () && region->warp_map_matches () && output_length > 0) {
+		carried_warp.reset (new WarpMap (*region->warp_map ()));
+		carried_warp->set_lengths (read_duration, output_length);
+		key_frames = carried_warp->key_frames (output_length);
+	}
+
 	uint32_t channels = region->n_channels ();
 
 #ifndef NDEBUG
@@ -171,7 +188,9 @@ RBEffect::run (std::shared_ptr<Region> r, Progress* progress)
 	                               (RubberBandStretcher::Options)tsr.opts,
 	                               stretch, shift);
 
-	progress->set_progress (0);
+	if (progress) {
+		progress->set_progress (0);
+	}
 	tsr.done = false;
 
 	stretcher.setDebugLevel (1);
@@ -238,7 +257,9 @@ RBEffect::run (std::shared_ptr<Region> r, Progress* progress)
 
 			pos += this_read;
 
-			progress->set_progress (((float)pos / read_duration) * 0.25);
+			if (progress) {
+				progress->set_progress (((float)pos / read_duration) * 0.25);
+			}
 
 			stretcher.study (buffers, this_read, pos == read_duration);
 		}
@@ -246,13 +267,13 @@ RBEffect::run (std::shared_ptr<Region> r, Progress* progress)
 		/* done studying, start process */
 		pos = 0;
 
-		if (!tsr.key_frames.empty ()) {
+		if (!key_frames.empty ()) {
 			/* warp markers: RubberBand only honours a key-frame map in
 			 * offline mode, and it must be set after study() and before
 			 * the first process() call. Drop anything outside the
 			 * input we actually read. */
 			std::map<size_t, size_t> kf;
-			for (auto const& k : tsr.key_frames) {
+			for (auto const& k : key_frames) {
 				if (k.first > 0 && k.first < (size_t)read_duration) {
 					kf.insert (k);
 				}
@@ -287,7 +308,9 @@ RBEffect::run (std::shared_ptr<Region> r, Progress* progress)
 
 			pos += this_read;
 
-			progress->set_progress (0.25 + ((float)pos / read_duration) * 0.75);
+			if (progress) {
+				progress->set_progress (0.25 + ((float)pos / read_duration) * 0.75);
+			}
 
 			stretcher.process (buffers, this_read, pos == read_duration);
 
@@ -390,6 +413,13 @@ RBEffect::run (std::shared_ptr<Region> r, Progress* progress)
 		 */
 		(*x)->set_length_unchecked ((*x)->length ().scale (tsr.time_fraction));
 		(*x)->set_whole_file (true);
+
+		if (carried_warp) {
+			std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (*x);
+			if (ar) {
+				ar->set_warp_map (carried_warp);
+			}
+		}
 	}
 
 out:
