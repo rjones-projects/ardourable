@@ -107,6 +107,17 @@ public:
 	 */
 	uint32_t active_voices (uint32_t n) const;
 
+	/** Release every sounding note on pad @p n only. RT-safe. */
+	void release_pad (uint32_t n, samplecnt_t time, Sink&);
+
+	/** Take over pad @p from_pad's sounding-note state from @p from as this
+	 * router's pad @p to_pad, without emitting any events, and clear it in
+	 * @p from. Used when a layout change keeps the same chain and play
+	 * note, so held notes survive the swap and their note-offs still get
+	 * through. RT-safe.
+	 */
+	void adopt_voices (DrumPadRouter& from, uint32_t from_pad, uint32_t to_pad);
+
 private:
 	std::vector<DrumPadConfig> _pads;
 	int16_t                    _note_to_pad[128];

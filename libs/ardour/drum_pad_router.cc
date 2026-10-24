@@ -222,6 +222,26 @@ DrumPadRouter::process (samplecnt_t time, uint8_t const* buf, uint32_t size, Sin
 }
 
 void
+DrumPadRouter::release_pad (uint32_t n, samplecnt_t time, Sink& sink)
+{
+	if (n < _pads.size ()) {
+		release (n, time, sink, false);
+	}
+}
+
+void
+DrumPadRouter::adopt_voices (DrumPadRouter& from, uint32_t from_pad, uint32_t to_pad)
+{
+	if (from_pad >= from._pads.size () || to_pad >= _pads.size ()) {
+		return;
+	}
+	for (int ch = 0; ch < 16; ++ch) {
+		_active[to_pad][ch]        = from._active[from_pad][ch];
+		from._active[from_pad][ch] = 0;
+	}
+}
+
+void
 DrumPadRouter::flush (samplecnt_t time, Sink& sink)
 {
 	for (uint32_t p = 0; p < _pads.size (); ++p) {

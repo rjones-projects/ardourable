@@ -88,6 +88,8 @@ class DrumPadRouterTest : public CppUnit::TestFixture
 	CPPUNIT_TEST (allNotesOffResetsTracking);
 	CPPUNIT_TEST (flushReleasesEverything);
 	CPPUNIT_TEST (velocityZeroIsNoteOff);
+	CPPUNIT_TEST (releasePadOnlyTouchesThatPad);
+	CPPUNIT_TEST (adoptVoicesMovesStateSilently);
 	CPPUNIT_TEST_SUITE_END ();
 
 public:
@@ -105,6 +107,8 @@ public:
 	void allNotesOffResetsTracking ();
 	void flushReleasesEverything ();
 	void velocityZeroIsNoteOff ();
+	void releasePadOnlyTouchesThatPad ();
+	void adoptVoicesMovesStateSilently ();
 };
 
 CPPUNIT_TEST_SUITE_REGISTRATION (DrumPadRouterTest);
@@ -330,4 +334,57 @@ DrumPadRouterTest::velocityZeroIsNoteOff ()
 	CPPUNIT_ASSERT_EQUAL ((size_t)2, s.events.size ());
 	CPPUNIT_ASSERT (is (s.events[1], 0, 0x90, 60, 0));
 	CPPUNIT_ASSERT_EQUAL ((uint32_t)0, r.active_voices (0));
+}
+
+void
+DrumPadRouterTest::releasePadOnlyTouchesThatPad ()
+{
+	DrumPadRouter r;
+	RecordingSink s;
+	CPPUNIT_ASSERT (r.set_pads (kit ()));
+
+	send (r, s, 0, 0x90, 36, 100);
+	send (r, s, 0, 0x90, 38, 100);
+	s.clear ();
+
+	r.release_pad (0, 7, s);
+	CPPUNIT_ASSERT_EQUAL ((size_t)1, s.events.size ());
+	CPPUNIT_ASSERT (is (s.events[0], 0, 0x80, 60, 64));
+	CPPUNIT_ASSERT_EQUAL ((uint32_t)0, r.active_voices (0));
+	CPPUNIT_ASSERT_EQUAL ((uint32_t)1, r.active_voices (1));
+
+	s.clear ();
+	r.release_pad (99, 0, s); /* out of range: no-op */
+	CPPUNIT_ASSERT (s.events.empty ());
+}
+
+void
+DrumPadRouterTest::adoptVoicesMovesStateSilently ()
+{
+	DrumPadRouter before;
+	DrumPadRouter after;
+	RecordingSink s;
+	CPPUNIT_ASSERT (before.set_pads (kit ()));
+
+	/* new layout: snare moved to index 0 */
+	std::vector<DrumPadConfig> pads;
+	pads.push_back (DrumPadConfig (38, 60));
+	pads.push_back (DrumPadConfig (36, 60));
+	CPPUNIT_ASSERT (after.set_pads (pads));
+
+	send (before, s, 0, 0x91, 38, 100); /* snare on channel 2 */
+	s.clear ();
+
+	after.adopt_voices (before, 1, 0);
+	CPPUNIT_ASSERT (s.events.empty ());
+	CPPUNIT_ASSERT_EQUAL ((uint32_t)0, before.active_voices (1));
+	CPPUNIT_ASSERT_EQUAL ((uint32_t)1, after.active_voices (0));
+
+	/* the held note's note-off now gets through the new router */
+	send (after, s, 0, 0x81, 38, 0);
+	CPPUNIT_ASSERT_EQUAL ((size_t)1, s.events.size ());
+	CPPUNIT_ASSERT (is (s.events[0], 0, 0x81, 60, 0));
+
+	after.adopt_voices (before, 50, 0); /* out of range: no-op */
+	after.adopt_voices (before, 0, 50);
 }
