@@ -1,6 +1,6 @@
 # Drum Rack and Warp Markers for Ardour — design
 
-Status: design + first slice (core-library models, no UI yet)
+Status: slices 1–2 done (core models + working `DrumRack` processor, scriptable from Lua; no GUI yet)
 Base: Ardour `master` after 9.8 (`9.8-241-gfd4ef0523b`)
 Branch: `feature/drum-rack-warp-markers`
 
@@ -31,12 +31,13 @@ MIDI in ──► DrumPadRouter ──► pad 0 MIDI ──► instrument ─►
 
 Two layers, so the RT-critical logic can be tested without a session:
 
-1. **`DrumPadRouter`** (this slice): pure MIDI routing. Splits the input stream by
+1. **`DrumPadRouter`** (slice 1): pure MIDI routing. Splits the input stream by
    trigger note, rewrites to each pad's play note, implements choke groups,
    tracks sounding notes so it can flush cleanly. No allocation, no locks.
-2. **`DrumRack`** (next slice): owns the pads' plugins and buffers, runs them, and
-   mixes. Modelled on `RegionFxPlugin`, which already hosts `Plugin`s outside a
-   `Route`'s processor list via `PlugInsertBase` (`libs/ardour/region_fx_plugin.cc`).
+2. **`DrumRack`** (slice 2): owns the pads' plugins and buffers, runs them, and
+   mixes. Like `RegionFxPlugin` (`libs/ardour/region_fx_plugin.cc`), it drives
+   `Plugin`s directly rather than through a `PluginInsert`; plugins don't depend
+   on having an insert (`Plugin::_pib` is only used by `PlugInsertBase` itself).
 
 ### 2.2 Pad semantics (matches Live where it matters)
 
@@ -58,33 +59,80 @@ Routing rules in `DrumPadRouter::process()`:
 - `flush()` releases everything; called on transport stop/locate and before a pad
   layout swap.
 
-### 2.3 Threading and state
+### 2.3 Threading and state (implemented)
 
-- Pad layout changes happen on the GUI thread. `DrumRack` will hold its pad set in
-  a `SerializedRCUManager` (as `DiskIOProcessor` does for its channel list). The RT thread
-  picks up a new pad set at the top of `run()`, calls `flush()` on the old router
-  first, then switches. `DrumPadRouter::set_pads()` itself is not RT-safe and is
-  never called from `run()`.
-- Plugin instantiation per pad is done off the RT thread; the new pad set is only
-  published once every plugin is configured and activated.
-- Session XML: a `DrumRack` node with one `Pad` child per pad (trigger, play, choke,
-  mute, gain, pan) and nested plugin state, reusing `Plugin::get_state()`. A
-  missing plugin on load keeps the pad and marks it unavailable (same approach as
-  `UnknownProcessor`).
+- The pad set (pads + router) lives in a `SerializedRCUManager`, as
+  `DiskIOProcessor` does for its channel list. Every edit (add, remove,
+  reconfigure, gain) copies the set off the RT thread, prepares plugins and
+  buffers, and publishes. `run()` picks up the new set at the start of a cycle.
+- Copying a set copies the layout but **not** the router's note state, so the
+  writer never reads memory the RT thread is mutating.
+- On a swap, `run()` hands held notes over: if a pad keeps the same plugin
+  instance and play note, its sounding-note count moves to the new router
+  (`DrumPadRouter::adopt_voices`), so held notes keep sounding and their
+  note-offs still arrive. Otherwise the notes are released into that plugin.
+  Changing a pad's gain therefore never cuts a note; changing its play note does.
+- Old sets are freed only off the RT thread: the RT thread keeps a reference
+  to the last set it used, and the RCU dead-wood list holds another, so the
+  RT thread never drops the last reference.
+- Session XML: the processor node (`type="drumrack"`) has one `Pad` child per pad
+  (id, name, trigger/play note, choke group, mute, gain) with a `Plugin` child
+  carrying type, unique id and the plugin's own state. Each pad's id is the
+  plugin's insert id, so LV2 state files don't collide. A plugin that isn't
+  installed keeps its pad and XML verbatim, so saving doesn't lose it.
+  `Route::set_processor_state()` recreates the rack from `type="drumrack"`.
 
-### 2.4 Audio path (next slice)
+### 2.4 Audio path
 
-- Each pad gets a scratch `BufferSet` from the session's thread buffers and its
-  own `ChanMapping`, so pads can't read each other's buffers.
-- Per-pad gain and pan as `AutomationControl`s owned by the rack, so they're
-  automatable and appear in generic controller mappings.
-- Latency: the rack reports the maximum pad latency and delays shorter pads to
-  match, so layered pads stay phase-aligned.
-- Optional per-pad outputs (Live's "return chains" equivalent) are a later stage.
-  Ardour's flexible pin-routing already supports multi-out instruments, so the rack
-  can expose `N*2` outputs and let the user route them.
+Implemented:
 
-### 2.5 UI (later slice)
+- MIDI in, stereo out. A track with audio inputs as well loses the audio at
+  the rack, as with any instrument.
+- Each pad owns its `BufferSet` (sized to the engine's maximum buffer), and its
+  in/out `ChanMapping`s are built when the pad is prepared, so `run()` doesn't
+  allocate.
+- Mono plugins feed both channels; plugins with more than two outputs
+  contribute their first two.
+- Per-pad gain (linear). Muted and zero-gain pads still run, so release tails
+  and note-offs are processed and unmuting is click-free at the plugin.
+- Bypass releases held notes and outputs silence.
+- Transport stop and locate release held notes, both in the router and via
+  each plugin's own `realtime_handle_transport_stopped()`/`realtime_locate()`.
+
+Still to do:
+
+- Per-pad pan, and gain as `AutomationControl`s so both are automatable and
+  map to controllers.
+- Latency: the rack reports its highest pad latency, but doesn't yet delay
+  lower-latency pads to match.
+- FX chains per pad (today a pad is one plugin).
+- Optional per-pad outputs (Live's "return chains" equivalent).
+
+### 2.5 Using it today (Lua)
+
+There's no GUI yet, but the rack is fully usable from Ardour's Lua scripting
+window (Window > Scripting) or as an editor action:
+
+```lua
+local rack = ARDOUR.LuaAPI.new_drum_rack (Session)
+-- trigger note, play note (255 = pass through), choke group, plugin, type
+ARDOUR.LuaAPI.drum_rack_add_pad (Session, rack, 36, 60, 0, "ACE Reasonable Synth", ARDOUR.PluginType.LV2)
+ARDOUR.LuaAPI.drum_rack_add_pad (Session, rack, 42, 60, 1, "ACE Reasonable Synth", ARDOUR.PluginType.LV2)
+ARDOUR.LuaAPI.drum_rack_add_pad (Session, rack, 46, 60, 1, "ACE Reasonable Synth", ARDOUR.PluginType.LV2)
+route:add_processor_by_index (rack, 0, nil, true)
+
+rack:to_drumrack ():set_pad_gain (0, 0.8)
+ARDOUR.LuaAPI.drum_rack_set_pad (rack, 1, 42, 60, 1, true) -- mute pad 1
+```
+
+`share/scripts/_drum_rack_demo.lua` adds a four-pad kit (hats choked
+together) to the selected MIDI tracks. Swap in any instrument plugin by name.
+The rack is saved with the session. It should show in the mixer strip's
+processor box like any processor that's displayed to the user, but the GUI
+wasn't built for this slice, so that's unverified; either way its pads can't be
+edited from there until the pad-grid UI exists.
+
+### 2.6 UI (later slice)
 
 - A 4×4 pad grid (16 visible, scrollable to 128), drag-and-drop a plugin or sample
   onto a pad. Ardour bundles no one-shot sampler (ACE Fluid Synth plays SF2
@@ -157,31 +205,47 @@ after the first call to process()"; the overall ratio still comes from
 
 | Slice | Content | State |
 |---|---|---|
-| 1 | `DrumPadRouter` + `WarpMap` + RubberBand key-frame hook + unit tests | **This branch** |
-| 2 | `DrumRack` processor hosting per-pad plugins, mixing to stereo, session state | Next |
+| 1 | `DrumPadRouter` + `WarpMap` + RubberBand key-frame hook + unit tests | Done |
+| 2 | `DrumRack` processor hosting per-pad plugins, mixing to stereo, session state, Lua API | Done |
 | 3 | `AudioRegion` warp persistence + re-render | Next |
 | 4 | Drum Rack pad-grid UI; warp markers on waveform | Later |
 | 5 | Warp in clip launcher; Push 2 pad mapping; per-pad outputs | Later |
 
 ## 5. Testing
 
-- Unit tests (cppunit): `libs/ardour/test/warp_map_test.cc` and
-  `libs/ardour/test/drum_pad_router_test.cc`. They're part of the combined
-  `run-tests` program, and with `--single-tests` also build on their own:
+- Unit tests (cppunit), all part of the combined `run-tests` program and, with
+  `--single-tests`, also built on their own:
+  - `warp_map_test.cc` (11): mapping, validation, key frames, state.
+  - `drum_pad_router_test.cc` (13): routing, choke, flush, voice hand-over.
+  - `drum_rack_test.cc` (11): runs a real `DrumRack` with ACE Reasonable Synth
+    (bundled, `libs/plugins/reasonablesynth.lv2`) on each pad in a dummy-backend
+    session and checks the rendered audio: note routing, pad gain, choke (and a
+    no-choke control), bypass, state round trip, held notes surviving a gain
+    change but released by a play-note change, and a MIDI track hosting the
+    rack and rebuilding it from saved route state.
+
+  The held-note test leans on the synth's envelope (5 ms attack, 800 ms decay,
+  100 ms release): a held note is still audible 200 ms after the swap, a
+  released one isn't. Disabling the hand-over makes it fail.
 
   ```sh
   ./waf configure --test --single-tests
-  ./waf build --targets=libardour,unit-test-warp_map,unit-test-drum_pad_router,ardev_common_waf.sh
+  ./waf build --targets=libardour,unit-test-warp_map,unit-test-drum_pad_router,unit-test-drum_rack,ardev_common_waf.sh
+  (cd libs/plugins/reasonablesynth.lv2 && ../../../waf build)   # LV2 bundle incl. .ttl
+  (cd libs/panners && ../../waf build)                          # sessions need panners
   (TOP=$PWD; . build/gtk2_ardour/ardev_common_waf.sh
-   build/libs/ardour/test_warp_map && build/libs/ardour/test_drum_pad_router)
+   build/libs/ardour/test_warp_map && build/libs/ardour/test_drum_pad_router &&
+   build/libs/ardour/test_drum_rack)
   ```
 
   The test binaries need the dev environment from `ardev_common_waf.sh`;
   without it `ARDOUR::init()` hangs. (`libs/ardour/run-tests.sh --single`
   currently prefixes absolute paths with `./`, so call the binaries directly.)
-- Slice 2 adds a session-level test that loads a DrumRack with two ACE Reasonable
-  Synth pads (bundled, `libs/plugins/reasonablesynth.lv2`) and checks choke
-  behaviour in the rendered audio.
+- The Lua API was also checked end to end with the headless `luasession` tool:
+  create a session, build a four-pad rack through `LuaAPI`, edit pads, add it
+  to a MIDI track, save, reload, and find the rack restored with its pads. (In
+  this environment `luasession` then hangs on the second `close_session()`;
+  it does the same in a script with no Drum Rack at all.)
 - Slice 3 adds a render test: a click track with markers at known positions,
   checking that the clicks land on the target samples (± stretcher tolerance).
 
