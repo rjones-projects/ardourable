@@ -165,9 +165,20 @@ after the first call to process()"; the overall ratio still comes from
 
 ## 5. Testing
 
-- Unit tests (cppunit, built with `./waf configure --test`):
-  `libs/ardour/test/warp_map_test.cc`, `libs/ardour/test/drum_pad_router_test.cc`.
-  Run `build/libs/ardour/test_warp_map` and `build/libs/ardour/test_drum_pad_router`.
+- Unit tests (cppunit): `libs/ardour/test/warp_map_test.cc` and
+  `libs/ardour/test/drum_pad_router_test.cc`. They're part of the combined
+  `run-tests` program, and with `--single-tests` also build on their own:
+
+  ```sh
+  ./waf configure --test --single-tests
+  ./waf build --targets=libardour,unit-test-warp_map,unit-test-drum_pad_router,ardev_common_waf.sh
+  (TOP=$PWD; . build/gtk2_ardour/ardev_common_waf.sh
+   build/libs/ardour/test_warp_map && build/libs/ardour/test_drum_pad_router)
+  ```
+
+  The test binaries need the dev environment from `ardev_common_waf.sh`;
+  without it `ARDOUR::init()` hangs. (`libs/ardour/run-tests.sh --single`
+  currently prefixes absolute paths with `./`, so call the binaries directly.)
 - Slice 2 adds a session-level test that loads a DrumRack with two ACE Reasonable
   Synth pads (bundled, `libs/plugins/reasonablesynth.lv2`) and checks choke
   behaviour in the rendered audio.

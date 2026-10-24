@@ -674,6 +674,8 @@ def build(bld):
             'test/mtdm_test.cc',
             'test/sha1_test.cc',
             'test/session_test.cc',
+            'test/warp_map_test.cc',
+            'test/drum_pad_router_test.cc',
         ]
 
 # Tests that don't work
