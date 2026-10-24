@@ -246,6 +246,20 @@ RBEffect::run (std::shared_ptr<Region> r, Progress* progress)
 		/* done studying, start process */
 		pos = 0;
 
+		if (!tsr.key_frames.empty ()) {
+			/* warp markers: RubberBand only honours a key-frame map in
+			 * offline mode, and it must be set after study() and before
+			 * the first process() call. Drop anything outside the
+			 * input we actually read. */
+			std::map<size_t, size_t> kf;
+			for (auto const& k : tsr.key_frames) {
+				if (k.first > 0 && k.first < (size_t)read_duration) {
+					kf.insert (k);
+				}
+			}
+			stretcher.setKeyFrameMap (kf);
+		}
+
 		while (pos < read_duration && !tsr.cancel) {
 			samplecnt_t this_read = 0;
 

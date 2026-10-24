@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <map>
+
 #include "temporal/types.h"
 #include "ardour/interthread_info.h"
 
@@ -47,6 +49,13 @@ namespace ARDOUR {
 		bool  antialias;
 		/* RubberBand */
 		int   opts; // really RubberBandStretcher::Options
+
+		/* Optional warp-marker key frames for the RubberBand offline
+		 * stretcher: input sample offset (relative to the first sample
+		 * read) -> output sample offset. Empty means a uniform stretch.
+		 * See WarpMap::key_frames().
+		 */
+		std::map<size_t, size_t> key_frames;
 	};
 }
 
