@@ -41,6 +41,8 @@
 #include "ardour/simple_export.h"
 #include "ardour/source_factory.h"
 #include "ardour/uri_map.h"
+#include "ardour/warp_map.h"
+#include "ardour/warp_render.h"
 
 #include "LuaBridge/LuaBridge.h"
 
@@ -133,6 +135,24 @@ ARDOUR::LuaAPI::drum_rack_set_pad (std::shared_ptr<Processor> proc, uint32_t pad
 		return false;
 	}
 	return rack->set_pad_config (pad, cfg);
+}
+
+WarpMap
+ARDOUR::LuaAPI::region_warp_map (std::shared_ptr<AudioRegion> r)
+{
+	if (!r) {
+		return WarpMap ();
+	}
+	if (r->warp_map_matches ()) {
+		return *r->warp_map ();
+	}
+	return WarpMap (r->unstretched_length (), r->length_samples ());
+}
+
+std::shared_ptr<AudioRegion>
+ARDOUR::LuaAPI::render_warp (std::shared_ptr<AudioRegion> r, WarpMap const& m)
+{
+	return ARDOUR::render_warp (r, m);
 }
 
 std::shared_ptr<Processor>

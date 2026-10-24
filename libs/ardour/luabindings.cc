@@ -66,6 +66,7 @@
 #include "ardour/disk_reader.h"
 #include "ardour/disk_writer.h"
 #include "ardour/drum_rack.h"
+#include "ardour/warp_map.h"
 #include "ardour/dsp_filter.h"
 #include "ardour/file_source.h"
 #include "ardour/filesystem_paths.h"
@@ -1758,6 +1759,8 @@ LuaBindings::common (lua_State* L)
 		.deriveWSPtrClass <AudioRegion, Region> ("AudioRegion")
 		.addCast<AudioReadable> ("to_readable")
 		.addFunction ("n_channels", &AudioRegion::n_channels)
+		.addFunction ("unstretched_length", &AudioRegion::unstretched_length)
+		.addFunction ("warp_map_matches", &AudioRegion::warp_map_matches)
 		.addFunction ("audio_source", &AudioRegion::audio_source)
 		.addFunction ("set_scale_amplitude", &AudioRegion::set_scale_amplitude)
 		.addFunction ("scale_amplitude", &AudioRegion::scale_amplitude)
@@ -2224,6 +2227,23 @@ LuaBindings::common (lua_State* L)
 
 		.deriveWSPtrClass <SoloSafeControl, SlavableAutomationControl> ("SoloSafeControl")
 		.addFunction ("solo_safe", &SoloSafeControl::solo_safe)
+		.endClass ()
+
+		.beginClass <WarpMap> ("WarpMap")
+		.addConstructor <void (*) (samplecnt_t, samplecnt_t)> ()
+		.addFunction ("source_length", &WarpMap::source_length)
+		.addFunction ("target_length", &WarpMap::target_length)
+		.addFunction ("set_lengths", &WarpMap::set_lengths)
+		.addFunction ("add_marker", &WarpMap::add_marker)
+		.addFunction ("add_marker_at_source", &WarpMap::add_marker_at_source)
+		.addFunction ("move_marker", &WarpMap::move_marker)
+		.addFunction ("remove_marker", &WarpMap::remove_marker)
+		.addFunction ("clear_markers", &WarpMap::clear_markers)
+		.addFunction ("empty", &WarpMap::empty)
+		.addFunction ("n_segments", &WarpMap::n_segments)
+		.addFunction ("segment_ratio", &WarpMap::segment_ratio)
+		.addFunction ("source_to_target", &WarpMap::source_to_target)
+		.addFunction ("target_to_source", &WarpMap::target_to_source)
 		.endClass ()
 
 		.deriveWSPtrClass <DrumRack, Processor> ("DrumRack")
@@ -3363,6 +3383,8 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("new_drum_rack", ARDOUR::LuaAPI::new_drum_rack)
 		.addFunction ("drum_rack_add_pad", ARDOUR::LuaAPI::drum_rack_add_pad)
 		.addFunction ("drum_rack_set_pad", ARDOUR::LuaAPI::drum_rack_set_pad)
+		.addFunction ("region_warp_map", ARDOUR::LuaAPI::region_warp_map)
+		.addFunction ("render_warp", ARDOUR::LuaAPI::render_warp)
 		.addFunction ("new_plugin_with_time_domain", ARDOUR::LuaAPI::new_plugin_with_time_domain)
 		.addFunction ("set_processor_param", ARDOUR::LuaAPI::set_processor_param)
 		.addFunction ("set_plugin_insert_param", ARDOUR::LuaAPI::set_plugin_insert_param)

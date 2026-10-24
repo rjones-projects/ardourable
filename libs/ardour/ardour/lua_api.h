@@ -34,6 +34,7 @@
 #include "ardour/midi_model.h"
 #include "ardour/processor.h"
 #include "ardour/session.h"
+#include "ardour/warp_map.h"
 
 namespace ARDOUR {
 	class AudioReadable;
@@ -103,6 +104,23 @@ namespace ARDOUR { namespace LuaAPI {
 	 * @returns false if the rack or pad doesn't exist or the mapping is invalid
 	 */
 	bool drum_rack_set_pad (std::shared_ptr<ARDOUR::Processor> rack, uint32_t pad, uint32_t trigger_note, uint32_t play_note, uint32_t choke_group, bool muted);
+
+	/** Get a region's warp markers to edit: a copy of the map it was
+	 * rendered with if that still matches the region, otherwise a fresh,
+	 * marker-less map from region->unstretched_length() to its length.
+	 * @param r an audio region
+	 * @returns a WarpMap (empty, 1:1 if @p r is nil)
+	 */
+	ARDOUR::WarpMap region_warp_map (std::shared_ptr<ARDOUR::AudioRegion> r);
+
+	/** Render an audio region through warp markers (see ARDOUR::render_warp).
+	 * The result isn't placed anywhere; swap it in with
+	 * Playlist:replace_region().
+	 * @param r an audio region
+	 * @param m warp markers, typically from region_warp_map()
+	 * @returns the new region, or nil on failure
+	 */
+	std::shared_ptr<ARDOUR::AudioRegion> render_warp (std::shared_ptr<ARDOUR::AudioRegion> r, ARDOUR::WarpMap const& m);
 
 	/** List all installed plugins */
 	std::list<std::shared_ptr<ARDOUR::PluginInfo> > list_plugins ();
