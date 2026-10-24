@@ -80,6 +80,30 @@ namespace ARDOUR { namespace LuaAPI {
 	/* As above but uses default time domain for the session/application */
 	std::shared_ptr<ARDOUR::Processor> new_luaproc (ARDOUR::Session *s, const std::string& p);
 
+	/** Create a new, empty Drum Rack. Add it to a MIDI track with
+	 * Route:add_processor_by_index().
+	 * @param s Session Handle
+	 * @returns Processor object (may be nil)
+	 */
+	std::shared_ptr<ARDOUR::Processor> new_drum_rack (ARDOUR::Session *s);
+
+	/** Add a pad to a Drum Rack, loading a new instance of the named plugin.
+	 * @param s Session Handle
+	 * @param rack a Processor created by new_drum_rack()
+	 * @param trigger_note MIDI note that fires the pad (0..127)
+	 * @param play_note note sent to the pad's plugin (0..127), or 255 to pass the trigger note through
+	 * @param choke_group 0 for none, or 1..16
+	 * @param name plugin name or URI (as for new_plugin)
+	 * @param type plugin type
+	 * @returns new pad index, or -1 on error
+	 */
+	int drum_rack_add_pad (ARDOUR::Session *s, std::shared_ptr<ARDOUR::Processor> rack, uint32_t trigger_note, uint32_t play_note, uint32_t choke_group, const std::string& name, ARDOUR::PluginType type);
+
+	/** Change a Drum Rack pad's note mapping, choke group and mute.
+	 * @returns false if the rack or pad doesn't exist or the mapping is invalid
+	 */
+	bool drum_rack_set_pad (std::shared_ptr<ARDOUR::Processor> rack, uint32_t pad, uint32_t trigger_note, uint32_t play_note, uint32_t choke_group, bool muted);
+
 	/** List all installed plugins */
 	std::list<std::shared_ptr<ARDOUR::PluginInfo> > list_plugins ();
 

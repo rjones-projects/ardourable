@@ -65,6 +65,7 @@
 #include "ardour/demo_sessions.h"
 #include "ardour/disk_reader.h"
 #include "ardour/disk_writer.h"
+#include "ardour/drum_rack.h"
 #include "ardour/dsp_filter.h"
 #include "ardour/file_source.h"
 #include "ardour/filesystem_paths.h"
@@ -1930,6 +1931,7 @@ LuaBindings::common (lua_State* L)
 		.addCast<IOProcessor> ("to_ioprocessor")
 		.addCast<UnknownProcessor> ("to_unknownprocessor")
 		.addCast<Amp> ("to_amp")
+		.addCast<DrumRack> ("to_drumrack")
 		.addCast<DiskIOProcessor> ("to_diskioprocessor")
 		.addCast<DiskReader> ("to_diskreader")
 		.addCast<DiskWriter> ("to_diskwriter")
@@ -2222,6 +2224,12 @@ LuaBindings::common (lua_State* L)
 
 		.deriveWSPtrClass <SoloSafeControl, SlavableAutomationControl> ("SoloSafeControl")
 		.addFunction ("solo_safe", &SoloSafeControl::solo_safe)
+		.endClass ()
+
+		.deriveWSPtrClass <DrumRack, Processor> ("DrumRack")
+		.addFunction ("n_pads", &DrumRack::n_pads)
+		.addFunction ("remove_pad", &DrumRack::remove_pad)
+		.addFunction ("set_pad_gain", &DrumRack::set_pad_gain)
 		.endClass ()
 
 		.deriveWSPtrClass <Amp, Processor> ("Amp")
@@ -3352,6 +3360,9 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("dump_untagged_plugins", ARDOUR::LuaAPI::dump_untagged_plugins)
 		.addFunction ("new_plugin_info", ARDOUR::LuaAPI::new_plugin_info)
 		.addFunction ("new_plugin", ARDOUR::LuaAPI::new_plugin)
+		.addFunction ("new_drum_rack", ARDOUR::LuaAPI::new_drum_rack)
+		.addFunction ("drum_rack_add_pad", ARDOUR::LuaAPI::drum_rack_add_pad)
+		.addFunction ("drum_rack_set_pad", ARDOUR::LuaAPI::drum_rack_set_pad)
 		.addFunction ("new_plugin_with_time_domain", ARDOUR::LuaAPI::new_plugin_with_time_domain)
 		.addFunction ("set_processor_param", ARDOUR::LuaAPI::set_processor_param)
 		.addFunction ("set_plugin_insert_param", ARDOUR::LuaAPI::set_plugin_insert_param)

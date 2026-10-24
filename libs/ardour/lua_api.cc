@@ -28,6 +28,7 @@
 #include "ardour/audioengine.h"
 #include "ardour/audiofilesource.h"
 #include "ardour/audiosource.h"
+#include "ardour/drum_rack.h"
 #include "ardour/internal_send.h"
 #include "ardour/lua_api.h"
 #include "ardour/luaproc.h"
@@ -78,6 +79,60 @@ std::shared_ptr<Processor>
 ARDOUR::LuaAPI::nil_processor ()
 {
 	return std::shared_ptr<Processor> ();
+}
+
+std::shared_ptr<Processor>
+ARDOUR::LuaAPI::new_drum_rack (Session *s)
+{
+	if (!s) {
+		return std::shared_ptr<Processor> ();
+	}
+	return std::shared_ptr<Processor> (new DrumRack (*s));
+}
+
+namespace {
+bool
+drum_pad_config (uint32_t trigger, uint32_t play, uint32_t choke, bool muted, DrumPadConfig& cfg)
+{
+	if (trigger > 127 || (play > 127 && play != DrumPadConfig::no_note) || choke > 16) {
+		return false;
+	}
+	cfg = DrumPadConfig (trigger, play, choke, muted);
+	return true;
+}
+} // namespace
+
+int
+ARDOUR::LuaAPI::drum_rack_add_pad (Session *s, std::shared_ptr<Processor> proc, uint32_t trigger, uint32_t play, uint32_t choke, const string& name, ARDOUR::PluginType type)
+{
+	std::shared_ptr<DrumRack> rack = std::dynamic_pointer_cast<DrumRack> (proc);
+	DrumPadConfig cfg;
+	if (!s || !rack || !drum_pad_config (trigger, play, choke, false, cfg)) {
+		return -1;
+	}
+
+	PluginInfoPtr pip = new_plugin_info (name, type);
+	if (!pip) {
+		return -1;
+	}
+
+	PluginPtr p = pip->load (*s);
+	if (!p) {
+		return -1;
+	}
+
+	return rack->add_pad (cfg, p);
+}
+
+bool
+ARDOUR::LuaAPI::drum_rack_set_pad (std::shared_ptr<Processor> proc, uint32_t pad, uint32_t trigger, uint32_t play, uint32_t choke, bool muted)
+{
+	std::shared_ptr<DrumRack> rack = std::dynamic_pointer_cast<DrumRack> (proc);
+	DrumPadConfig cfg;
+	if (!rack || !drum_pad_config (trigger, play, choke, muted, cfg)) {
+		return false;
+	}
+	return rack->set_pad_config (pad, cfg);
 }
 
 std::shared_ptr<Processor>
