@@ -1,6 +1,6 @@
 # Drum Rack and Warp Markers for Ardour — design
 
-Status: slices 1–2 done (core models + working `DrumRack` processor, scriptable from Lua; no GUI yet)
+Status: slices 1–3 done (core models, working `DrumRack`, warp rendering on audio regions; all scriptable from Lua, no GUI yet)
 Base: Ardour `master` after 9.8 (`9.8-241-gfd4ef0523b`)
 Branch: `feature/drum-rack-warp-markers`
 
@@ -150,12 +150,12 @@ Two places in Ardour stretch audio, and they need different strategies:
 
 | Where | Engine today | Plan |
 |---|---|---|
-| Timeline audio regions | Offline `RBStretch`/`SPStretch`/`STStretch` filters render a new source (`libs/ardour/rb_effect.cc`) | **Offline, piecewise via RubberBand's key-frame map** (this slice) |
+| Timeline audio regions | Offline `RBStretch`/`SPStretch`/`STStretch` filters render a new source (`libs/ardour/rb_effect.cc`) | **Offline, piecewise via RubberBand's key-frame map** (slices 1 and 3) |
 | Cue/clip launcher (`AudioTrigger`) | RubberBand in `OptionProcessRealTime` mode (`triggerbox.cc`) | Real-time: change the time ratio per segment as playback crosses markers. Key-frame maps are offline-only. |
 
 Doing the timeline first keeps the first slice out of the RT path entirely.
 
-### 3.2 Data model: `WarpMap` (this slice)
+### 3.2 Data model: `WarpMap` (slice 1)
 
 A piecewise-linear map from region-relative source samples to output samples:
 
@@ -173,23 +173,76 @@ is what RubberBand's own header requires (`setKeyFrameMap` "may not be called
 after the first call to process()"; the overall ratio still comes from
 `setTimeRatio`). With an empty map the code path is unchanged.
 
-### 3.3 Next slices
+### 3.3 Warped regions (slice 3, implemented)
 
-1. **Persist on the region.** Add an optional `WarpMap` to `AudioRegion`, saved
-   inside the region's XML node. When warp markers change, re-run the stretch from
-   the ancestral source (the existing `ancestral_start`/`stretch` bookkeeping in
-   `RBEffect::run()` already handles "stretch from the original, not the last
-   render").
-2. **Musical time.** Store marker targets in beats (`Temporal::Beats`) rather than
+- `ARDOUR::render_warp (region, map)` (`warp_render.h`) renders a region through
+  a `WarpMap` with `RBStretch` and returns a new region; the caller swaps it into
+  the playlist (as the editor does for stretches; `Playlist::replace_region()`
+  in C++, remove + add from Lua). The map's source length must
+  equal `AudioRegion::unstretched_length()` (length ÷ stretch), the span of
+  original audio the region reads; its target length becomes the new length.
+- Renders always start from the region's original (master) audio, using the
+  existing `ancestral_start`/`stretch` bookkeeping in `RBEffect::run()`, so
+  re-warping a warped region doesn't stack artefacts. A test re-warps a warped
+  region and checks the clicks follow only the second map.
+- The result carries its `WarpMap` (`AudioRegion::warp_map()`), saved as a
+  `WarpMap` child of the region's XML node.
+- **Ordinary stretches keep the warp.** `RBEffect::run()` re-renders from the
+  original audio, so before this change stretching (or pitch-shifting) a warped
+  region with the existing tool would silently flatten it. Now, if the request
+  has no key frames of its own and the region's map still matches, the map is
+  rescaled to the new length and applied, and the new region carries it.
+- Plain copies (including `RegionFactory`'s zero-offset copies) keep the map.
+  Splits don't, and a map that no longer matches the region (after a trim) is
+  ignored by renders rather than applied to the wrong audio.
+- `RBEffect::run()` now tolerates a null `Progress`, which its signature
+  already allowed (`Filter::run (region, progress = 0)`) but which crashed.
+
+Lua (Window > Scripting):
+
+```lua
+local r  = region:to_audioregion ()
+local m  = ARDOUR.LuaAPI.region_warp_map (r)  -- existing markers, or a 1:1 map
+local sr = Session:nominal_sample_rate ()
+m:add_marker (2 * sr, 2 * sr + sr / 10)       -- audio at 2.0 s lands at 2.1 s
+local nr = ARDOUR.LuaAPI.render_warp (r, m)
+if not nr:isnil () then
+  local pos = r:position ()
+  playlist:remove_region (r)
+  playlist:add_region (nr, pos, 1, false)
+end
+```
+
+The WarpMap bindings were smoke-tested in the headless `luasession` runner;
+this region-to-playlist example wasn't run end to end (there was no easy way
+to put audio in a headless session), but every call in it is the same C++ the
+render tests exercise.
+
+Known limitations:
+
+- Region gain envelopes and region-FX automation are still scaled uniformly by
+  the overall ratio, not warped per segment.
+- The pitch-shift path (`RBPitch`, also an `RBEffect`) goes through the same
+  carry-over code but has no test of its own yet.
+- StaffPad and SoundTouch take no key frames; stretching a warped region with
+  them falls back to a uniform stretch from the original audio and drops the map.
+- RubberBand's transient placement isn't exact. Measured on a click track (R3
+  engine, crisp transients, 48 kHz): click peaks land within ~1.5 ms at a 1.5×
+  segment ratio, but ~7 ms early at 2.2×. A warped segment behaves the same as a
+  uniform stretch at its ratio, so this is the stretcher, not the key-frame map.
+
+### 3.4 Next slices
+
+1. **Musical time.** Store marker targets in beats (`Temporal::Beats`) rather than
    samples, so a tempo change re-renders correctly. Regions already carry a
    position time domain (`Region::position_time_domain()`), which this can follow.
-3. **Editor UI.** Markers drawn on the region's waveform; drag to move, double-click
+2. **Editor UI.** Markers drawn on the region's waveform; drag to move, double-click
    to add, a "warp" edit mode alongside the existing stretch tool.
-4. **Clips.** Add `WarpMap` to `AudioTrigger`; in `AudioTrigger::run()`, call
+3. **Clips.** Add `WarpMap` to `AudioTrigger`; in `AudioTrigger::run()`, call
    `setTimeRatio()` per segment as the read position crosses each marker.
-5. **Auto-warp.** Seed markers from `TransientDetector`/aubio onsets.
+4. **Auto-warp.** Seed markers from `TransientDetector`/aubio onsets.
 
-### 3.4 Constraints and open questions
+### 3.5 Constraints and open questions
 
 - RubberBand wants "a reasonable gap" between key frames. The UI should enforce a
   minimum marker spacing (tens of milliseconds); `WarpMap` itself only enforces
@@ -207,7 +260,7 @@ after the first call to process()"; the overall ratio still comes from
 |---|---|---|
 | 1 | `DrumPadRouter` + `WarpMap` + RubberBand key-frame hook + unit tests | Done |
 | 2 | `DrumRack` processor hosting per-pad plugins, mixing to stereo, session state, Lua API | Done |
-| 3 | `AudioRegion` warp persistence + re-render | Next |
+| 3 | `AudioRegion` warp persistence + re-render, Lua API | Done |
 | 4 | Drum Rack pad-grid UI; warp markers on waveform | Later |
 | 5 | Warp in clip launcher; Push 2 pad mapping; per-pad outputs | Later |
 
@@ -217,6 +270,12 @@ after the first call to process()"; the overall ratio still comes from
   `--single-tests`, also built on their own:
   - `warp_map_test.cc` (11): mapping, validation, key frames, state.
   - `drum_pad_router_test.cc` (13): routing, choke, flush, voice hand-over.
+  - `warp_render_test.cc` (7): renders a click track (2 ms bursts every
+    500 ms) through `render_warp()` and checks each click's peak lands within
+    5 ms of where the map says: uniform map, two moved markers, re-warp from
+    the original audio, warp kept through a plain 1.25× stretch, mismatched
+    map rejected, copies vs splits, region XML round trip. Disabling the
+    stretch carry-over makes the 1.25× test fail by ~13 ms.
   - `drum_rack_test.cc` (11): runs a real `DrumRack` with ACE Reasonable Synth
     (bundled, `libs/plugins/reasonablesynth.lv2`) on each pad in a dummy-backend
     session and checks the rendered audio: note routing, pad gain, choke (and a
@@ -230,12 +289,12 @@ after the first call to process()"; the overall ratio still comes from
 
   ```sh
   ./waf configure --test --single-tests
-  ./waf build --targets=libardour,unit-test-warp_map,unit-test-drum_pad_router,unit-test-drum_rack,ardev_common_waf.sh
+  ./waf build --targets=libardour,unit-test-warp_map,unit-test-drum_pad_router,unit-test-drum_rack,unit-test-warp_render,ardev_common_waf.sh
   (cd libs/plugins/reasonablesynth.lv2 && ../../../waf build)   # LV2 bundle incl. .ttl
   (cd libs/panners && ../../waf build)                          # sessions need panners
   (TOP=$PWD; . build/gtk2_ardour/ardev_common_waf.sh
    build/libs/ardour/test_warp_map && build/libs/ardour/test_drum_pad_router &&
-   build/libs/ardour/test_drum_rack)
+   build/libs/ardour/test_drum_rack && build/libs/ardour/test_warp_render)
   ```
 
   The test binaries need the dev environment from `ardev_common_waf.sh`;
@@ -246,8 +305,6 @@ after the first call to process()"; the overall ratio still comes from
   to a MIDI track, save, reload, and find the rack restored with its pads. (In
   this environment `luasession` then hangs on the second `close_session()`;
   it does the same in a script with no Drum Rack at all.)
-- Slice 3 adds a render test: a click track with markers at known positions,
-  checking that the clicks land on the target samples (± stretcher tolerance).
 
 ## 6. Upstream
 
