@@ -285,6 +285,7 @@ libardour_sources = [
         'velocity_control.cc',
         'video_tools_paths.cc',
         'warp_map.cc',
+        'warp_render.cc',
         'vumeterdsp.cc',
         'wallclock_transport.cc',
         'worker.cc',
@@ -654,6 +655,7 @@ def build(bld):
             create_ardour_test_program(bld, obj.includes, 'unit-test-warp_map', 'test_warp_map', ['test/warp_map_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-drum_pad_router', 'test_drum_pad_router', ['test/drum_pad_router_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-drum_rack', 'test_drum_rack', ['test/drum_rack_test.cc'])
+            create_ardour_test_program(bld, obj.includes, 'unit-test-warp_render', 'test_warp_render', ['test/warp_render_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-dsp_load_calculator', 'test_dsp_load_calculator', ['test/dsp_load_calculator_test.cc'])
 
         test_sources  = [
@@ -679,6 +681,7 @@ def build(bld):
             'test/warp_map_test.cc',
             'test/drum_pad_router_test.cc',
             'test/drum_rack_test.cc',
+            'test/warp_render_test.cc',
         ]
 
 # Tests that don't work
