@@ -64,6 +64,7 @@
 #include "ardour/delivery.h"
 #include "ardour/disk_reader.h"
 #include "ardour/disk_writer.h"
+#include "ardour/drum_rack.h"
 #include "ardour/event_type_map.h"
 #include "ardour/gain_control.h"
 #include "ardour/graph.h"
@@ -3669,6 +3670,11 @@ Route::set_processor_state (XMLNode const& node, int version, XMLProperty const*
 				processor.reset (new PluginInsert (_session, tdp));
 				processor->set_owner (this);
 			}
+		} else if (prop->value() == DrumRack::type_name) {
+
+			processor.reset (new DrumRack (_session));
+			processor->set_owner (this);
+
 		} else if (prop->value() == "port") {
 
 			processor.reset (new PortInsert (_session, _pannable, _mute_master));

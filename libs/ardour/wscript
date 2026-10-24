@@ -64,6 +64,7 @@ libardour_sources = [
         'disk_reader.cc',
         'disk_writer.cc',
         'drum_pad_router.cc',
+        'drum_rack.cc',
         'dsp_filter.cc',
         'ebur128_analysis.cc',
         'element_import_handler.cc',
@@ -652,6 +653,7 @@ def build(bld):
             create_ardour_test_program(bld, obj.includes, 'unit-test-session', 'test_session', ['test/session_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-warp_map', 'test_warp_map', ['test/warp_map_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-drum_pad_router', 'test_drum_pad_router', ['test/drum_pad_router_test.cc'])
+            create_ardour_test_program(bld, obj.includes, 'unit-test-drum_rack', 'test_drum_rack', ['test/drum_rack_test.cc'])
             create_ardour_test_program(bld, obj.includes, 'unit-test-dsp_load_calculator', 'test_dsp_load_calculator', ['test/dsp_load_calculator_test.cc'])
 
         test_sources  = [
@@ -676,6 +678,7 @@ def build(bld):
             'test/session_test.cc',
             'test/warp_map_test.cc',
             'test/drum_pad_router_test.cc',
+            'test/drum_rack_test.cc',
         ]
 
 # Tests that don't work
