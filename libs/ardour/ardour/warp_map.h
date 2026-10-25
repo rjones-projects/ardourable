@@ -20,6 +20,7 @@
 
 #include <cstddef>
 #include <map>
+#include <string>
 #include <vector>
 
 #include "ardour/libardour_visibility.h"
@@ -122,6 +123,17 @@ public:
 
 	XMLNode& get_state () const;
 	int      set_state (XMLNode const&);
+
+	/** Compact text form, "source-length target-length s1 t1 s2 t2 ...",
+	 * used to store the map as a region property (so edits are undoable
+	 * through the normal property-diff machinery).
+	 */
+	std::string to_string () const;
+
+	/** Parse to_string() output. On failure returns false and leaves the
+	 * map unchanged.
+	 */
+	bool from_string (std::string const&);
 
 	bool operator== (WarpMap const& o) const;
 	bool operator!= (WarpMap const& o) const { return !(*this == o); }

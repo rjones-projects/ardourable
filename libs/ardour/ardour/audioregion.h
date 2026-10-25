@@ -58,6 +58,7 @@ namespace Properties {
 	LIBARDOUR_API extern PBD::PropertyDescriptor<std::shared_ptr<AutomationList> > fade_out;
 	LIBARDOUR_API extern PBD::PropertyDescriptor<std::shared_ptr<AutomationList> > inverse_fade_out;
 	LIBARDOUR_API extern PBD::PropertyDescriptor<std::shared_ptr<AutomationList> > envelope;
+	LIBARDOUR_API extern PBD::PropertyDescriptor<std::string> warp_markers;
 }
 
 class Playlist;
@@ -124,8 +125,11 @@ class LIBARDOUR_API AudioRegion : public Region, public AudioReadable
 	 * regions don't. A map whose source length no longer matches
 	 * unstretched_length() (e.g. after a trim) is ignored by renders.
 	 */
-	std::shared_ptr<WarpMap const> warp_map () const { return _warp_map; }
-	void set_warp_map (std::shared_ptr<WarpMap const> m) { _warp_map = m; }
+	std::shared_ptr<WarpMap const> warp_map () const;
+	/** Replace (or with null, clear) the warp markers. This only records
+	 * them; it doesn't re-render audio. Undoable like any region property
+	 * (Properties::warp_markers). */
+	void set_warp_map (std::shared_ptr<WarpMap const>);
 	bool warp_map_matches () const;
 
 	Temporal::Range body_range () const;
@@ -248,6 +252,7 @@ class LIBARDOUR_API AudioRegion : public Region, public AudioReadable
 	PBD::Property<bool>     _fade_in_active;
 	PBD::Property<bool>     _fade_out_active;
 	PBD::Property<bool>     _fade_before_fx;
+	PBD::Property<std::string> _warp_markers; ///< WarpMap::to_string(), or empty
 	/** linear gain to apply to the whole region */
 	PBD::Property<gain_t>   _scale_amplitude;
 
@@ -293,7 +298,9 @@ class LIBARDOUR_API AudioRegion : public Region, public AudioReadable
 	pframes_t           _fx_block_size;
 	mutable bool        _fx_latent_read;
 
-	std::shared_ptr<WarpMap const> _warp_map;
+	/* parsed _warp_markers, rebuilt when the string changes */
+	mutable std::string                    _warp_cache_key;
+	mutable std::shared_ptr<WarpMap const> _warp_cache;
 
 	mutable PBD::Mutex _read_lock;
 	mutable PBD::Mutex _cache_lock;

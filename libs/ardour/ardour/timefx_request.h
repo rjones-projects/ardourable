@@ -39,7 +39,8 @@ namespace ARDOUR {
 			, pitch_fraction(0)
 			, quick_seek(false)
 			, antialias(false)
-			, opts(0) {}
+			, opts(0)
+			, explicit_key_frames (false) {}
 
 		Algorithm algorithm;
 		Temporal::ratio_t time_fraction;
@@ -56,6 +57,12 @@ namespace ARDOUR {
 		 * See WarpMap::key_frames().
 		 */
 		std::map<size_t, size_t> key_frames;
+
+		/* true when key_frames is the complete warp to apply, even if
+		 * empty (a warp with no markers is a uniform stretch). When
+		 * false and key_frames is empty, RBEffect keeps any warp the
+		 * region was rendered with. */
+		bool explicit_key_frames;
 	};
 }
 

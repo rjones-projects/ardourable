@@ -39,6 +39,8 @@ class WarpMapTest : public CppUnit::TestFixture
 	CPPUNIT_TEST (setLengthsRescales);
 	CPPUNIT_TEST (stateRoundTrip);
 	CPPUNIT_TEST (badStateLeavesMapUntouched);
+	CPPUNIT_TEST (stringRoundTrip);
+	CPPUNIT_TEST (badStringLeavesMapUntouched);
 	CPPUNIT_TEST_SUITE_END ();
 
 public:
@@ -56,6 +58,8 @@ public:
 	void setLengthsRescales ();
 	void stateRoundTrip ();
 	void badStateLeavesMapUntouched ();
+	void stringRoundTrip ();
+	void badStringLeavesMapUntouched ();
 };
 
 CPPUNIT_TEST_SUITE_REGISTRATION (WarpMapTest);
@@ -256,5 +260,39 @@ WarpMapTest::badStateLeavesMapUntouched ()
 	b->set_property ("target", (samplecnt_t)300); /* runs backwards */
 
 	CPPUNIT_ASSERT_EQUAL (-1, m.set_state (backwards));
+	CPPUNIT_ASSERT (m == before);
+}
+
+void
+WarpMapTest::stringRoundTrip ()
+{
+	WarpMap m (48000, 96000);
+	CPPUNIT_ASSERT_EQUAL (std::string ("48000 96000"), m.to_string ());
+
+	CPPUNIT_ASSERT (m.add_marker (12000, 30000));
+	CPPUNIT_ASSERT (m.add_marker (36000, 70000));
+	CPPUNIT_ASSERT_EQUAL (std::string ("48000 96000 12000 30000 36000 70000"), m.to_string ());
+
+	WarpMap r;
+	CPPUNIT_ASSERT (r.from_string (m.to_string ()));
+	CPPUNIT_ASSERT (r == m);
+	CPPUNIT_ASSERT (r.from_string ("  10 20   5 15 "));
+	CPPUNIT_ASSERT_EQUAL ((size_t)1, r.markers ().size ());
+}
+
+void
+WarpMapTest::badStringLeavesMapUntouched ()
+{
+	WarpMap m (1000, 1000);
+	CPPUNIT_ASSERT (m.add_marker (500, 500));
+	WarpMap const before (m);
+
+	CPPUNIT_ASSERT (!m.from_string (""));
+	CPPUNIT_ASSERT (!m.from_string ("1000"));
+	CPPUNIT_ASSERT (!m.from_string ("0 1000"));
+	CPPUNIT_ASSERT (!m.from_string ("1000 1000 200"));           /* odd count */
+	CPPUNIT_ASSERT (!m.from_string ("1000 1000 200 600 400 300")); /* backwards */
+	CPPUNIT_ASSERT (!m.from_string ("1000 1000 200 x"));
+	CPPUNIT_ASSERT (!m.from_string ("1000 1000 junk"));
 	CPPUNIT_ASSERT (m == before);
 }

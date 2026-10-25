@@ -167,7 +167,7 @@ RBEffect::run (std::shared_ptr<Region> r, Progress* progress)
 	std::map<size_t, size_t>   key_frames (tsr.key_frames);
 	std::shared_ptr<WarpMap>   carried_warp;
 
-	if (key_frames.empty () && region->warp_map_matches () && output_length > 0) {
+	if (!tsr.explicit_key_frames && key_frames.empty () && region->warp_map_matches () && output_length > 0) {
 		carried_warp.reset (new WarpMap (*region->warp_map ()));
 		carried_warp->set_lengths (read_duration, output_length);
 		key_frames = carried_warp->key_frames (output_length);

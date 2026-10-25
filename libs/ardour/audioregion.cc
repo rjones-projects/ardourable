@@ -87,6 +87,7 @@ namespace ARDOUR {
 		PBD::PropertyDescriptor<std::shared_ptr<AutomationList> > fade_out;
 		PBD::PropertyDescriptor<std::shared_ptr<AutomationList> > inverse_fade_out;
 		PBD::PropertyDescriptor<std::shared_ptr<AutomationList> > envelope;
+		PBD::PropertyDescriptor<std::string> warp_markers;
 	}
 }
 
@@ -177,6 +178,8 @@ AudioRegion::make_property_quarks ()
 	DEBUG_TRACE (DEBUG::Properties, string_compose ("quark for fade-out-active = %1\n", Properties::fade_out_active.property_id));
 	Properties::fade_before_fx.property_id = g_quark_from_static_string (X_("fade-before-fx"));
 	DEBUG_TRACE (DEBUG::Properties, string_compose ("quark for fade-before-fx = %1\n", Properties::fade_before_fx.property_id));
+	Properties::warp_markers.property_id = g_quark_from_static_string (X_("warp-markers"));
+	DEBUG_TRACE (DEBUG::Properties, string_compose ("quark for warp-markers = %1\n", Properties::warp_markers.property_id));
 	Properties::scale_amplitude.property_id = g_quark_from_static_string (X_("scale-amplitude"));
 	DEBUG_TRACE (DEBUG::Properties, string_compose ("quark for scale-amplitude = %1\n", Properties::scale_amplitude.property_id));
 	Properties::fade_in.property_id = g_quark_from_static_string (X_("FadeIn"));
@@ -202,6 +205,7 @@ AudioRegion::register_properties ()
 	add_property (_fade_in_active);
 	add_property (_fade_out_active);
 	add_property (_fade_before_fx);
+	add_property (_warp_markers);
 	add_property (_scale_amplitude);
 	add_property (_fade_in);
 	add_property (_inverse_fade_in);
@@ -217,6 +221,7 @@ AudioRegion::register_properties ()
 	, _fade_in_active (Properties::fade_in_active, true) \
 	, _fade_out_active (Properties::fade_out_active, true) \
 	, _fade_before_fx (Properties::fade_before_fx, false) \
+	, _warp_markers (Properties::warp_markers, std::string ()) \
 	, _scale_amplitude (Properties::scale_amplitude, 1.0) \
 	, _fade_in (Properties::fade_in, std::shared_ptr<AutomationList> (new AutomationList (Evoral::Parameter (FadeInAutomation), tdp))) \
 	, _inverse_fade_in (Properties::inverse_fade_in, std::shared_ptr<AutomationList> (new AutomationList (Evoral::Parameter (FadeInAutomation), tdp))) \
@@ -230,6 +235,7 @@ AudioRegion::register_properties ()
 	, _fade_in_active (Properties::fade_in_active, other->_fade_in_active) \
 	, _fade_out_active (Properties::fade_out_active, other->_fade_out_active) \
 	, _fade_before_fx (Properties::fade_before_fx, other->_fade_before_fx) \
+	, _warp_markers (Properties::warp_markers, std::string ()) \
 	, _scale_amplitude (Properties::scale_amplitude, other->_scale_amplitude) \
 	, _fade_in (Properties::fade_in, std::shared_ptr<AutomationList> (new AutomationList (*other->_fade_in.val()))) \
 	, _inverse_fade_in (Properties::inverse_fade_in, std::shared_ptr<AutomationList> (new AutomationList (*other->_inverse_fade_in.val()))) \
@@ -354,7 +360,7 @@ AudioRegion::AudioRegion (std::shared_ptr<const AudioRegion> other)
 	copy_plugin_state (other);
 
 	/* an exact copy reads the same audio, so the same warp markers apply */
-	_warp_map = other->_warp_map;
+	_warp_markers = other->_warp_markers.val ();
 
 	assert(_type == DataType::AUDIO);
 	assert (_sources.size() == _master_sources.size());
@@ -389,7 +395,7 @@ AudioRegion::AudioRegion (std::shared_ptr<const AudioRegion> other, timecnt_t co
 	 * Those read the same audio, so the warp markers still apply; a
 	 * non-zero offset (a split) reads different audio, so they don't. */
 	if (offset.is_zero ()) {
-		_warp_map = other->_warp_map;
+		_warp_markers = other->_warp_markers.val ();
 	}
 
 	assert(_type == DataType::AUDIO);
@@ -1233,10 +1239,6 @@ AudioRegion::state () const
 		child->add_child_nocopy (_inverse_fade_out->get_state ());
 	}
 
-	if (_warp_map) {
-		node.add_child_nocopy (_warp_map->get_state ());
-	}
-
 	return node;
 }
 
@@ -1279,9 +1281,13 @@ AudioRegion::_set_state (const XMLNode& node, int version, PropertyChange& what_
 
 		if (child->name() == WarpMap::xml_node_name) {
 
-			std::shared_ptr<WarpMap> m (new WarpMap);
-			if (m->set_state (*child) == 0) {
-				_warp_map = m;
+			/* sessions from before warp markers became a property */
+			WarpMap m;
+			if (m.set_state (*child) == 0) {
+				if (_warp_markers.val () != m.to_string ()) {
+					_warp_markers = m.to_string ();
+					what_changed.add (Properties::warp_markers);
+				}
 			} else {
 				warning << string_compose (_("Region \"%1\": ignoring invalid warp markers"), name ()) << endmsg;
 			}
@@ -2816,8 +2822,42 @@ AudioRegion::unstretched_length () const
 	return samplecnt_t (length_samples () / (double)stretch ());
 }
 
+std::shared_ptr<WarpMap const>
+AudioRegion::warp_map () const
+{
+	std::string const& str (_warp_markers.val ());
+
+	if (str != _warp_cache_key) {
+		_warp_cache_key = str;
+		_warp_cache.reset ();
+
+		if (!str.empty ()) {
+			std::shared_ptr<WarpMap> m (new WarpMap);
+			if (m->from_string (str)) {
+				_warp_cache = m;
+			} else {
+				warning << string_compose (_("Region \"%1\": ignoring invalid warp markers"), name ()) << endmsg;
+			}
+		}
+	}
+
+	return _warp_cache;
+}
+
+void
+AudioRegion::set_warp_map (std::shared_ptr<WarpMap const> m)
+{
+	std::string const str = m ? m->to_string () : std::string ();
+
+	if (str != _warp_markers.val ()) {
+		_warp_markers = str;
+		send_change (PropertyChange (Properties::warp_markers));
+	}
+}
+
 bool
 AudioRegion::warp_map_matches () const
 {
-	return _warp_map && _warp_map->source_length () == unstretched_length ();
+	std::shared_ptr<WarpMap const> m = warp_map ();
+	return m && m->source_length () == unstretched_length ();
 }

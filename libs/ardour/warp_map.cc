@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 
 #include "pbd/xml++.h"
 
@@ -288,4 +289,43 @@ bool
 WarpMap::operator== (WarpMap const& o) const
 {
 	return _source_length == o._source_length && _target_length == o._target_length && _markers == o._markers;
+}
+
+std::string
+WarpMap::to_string () const
+{
+	std::ostringstream os;
+	os << _source_length << ' ' << _target_length;
+	for (Markers::const_iterator m = _markers.begin (); m != _markers.end (); ++m) {
+		os << ' ' << m->source << ' ' << m->target;
+	}
+	return os.str ();
+}
+
+bool
+WarpMap::from_string (std::string const& str)
+{
+	std::istringstream is (str);
+	samplecnt_t        sl;
+	samplecnt_t        tl;
+
+	if (!(is >> sl >> tl) || sl < 1 || tl < 1) {
+		return false;
+	}
+
+	WarpMap     tmp (sl, tl);
+	samplecnt_t s;
+	samplecnt_t t;
+
+	while (is >> s) {
+		if (!(is >> t) || !tmp.add_marker (s, t)) {
+			return false;
+		}
+	}
+	if (!is.eof ()) {
+		return false; /* trailing junk */
+	}
+
+	*this = tmp;
+	return true;
 }

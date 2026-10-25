@@ -74,6 +74,9 @@ ARDOUR::render_warp (std::shared_ptr<AudioRegion> region, WarpMap const& map, in
 	tsr.pitch_fraction = 1.0;
 	tsr.opts           = opts;
 	tsr.key_frames     = map.key_frames (map.target_length ());
+	/* even with no markers: that's an even stretch, not "keep the
+	 * region's old warp" */
+	tsr.explicit_key_frames = true;
 
 	RBStretch stretch (region->session (), tsr);
 

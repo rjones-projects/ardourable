@@ -29,6 +29,7 @@
 #include <cppunit/extensions/HelperMacros.h>
 
 #include "pbd/compose.h"
+#include "pbd/stateful_diff_command.h"
 #include "pbd/xml++.h"
 
 #include "ardour/audioregion.h"
@@ -56,6 +57,9 @@ class WarpRenderTest : public TestNeedingSession
 	CPPUNIT_TEST (rejectsMismatchedMap);
 	CPPUNIT_TEST (copiesKeepWarpSplitsDont);
 	CPPUNIT_TEST (regionStateRoundTrip);
+	CPPUNIT_TEST (legacyChildNodeStillLoads);
+	CPPUNIT_TEST (removingLastMarkerUnwarps);
+	CPPUNIT_TEST (markerEditsAreUndoable);
 	CPPUNIT_TEST_SUITE_END ();
 
 public:
@@ -69,6 +73,9 @@ public:
 	void rejectsMismatchedMap ();
 	void copiesKeepWarpSplitsDont ();
 	void regionStateRoundTrip ();
+	void legacyChildNodeStillLoads ();
+	void removingLastMarkerUnwarps ();
+	void markerEditsAreUndoable ();
 
 private:
 	samplecnt_t                   _rate;
@@ -308,7 +315,9 @@ WarpRenderTest::regionStateRoundTrip ()
 	CPPUNIT_ASSERT (warped);
 
 	XMLNode& node (warped->get_state ());
-	CPPUNIT_ASSERT (node.child (WarpMap::xml_node_name));
+	std::string prop;
+	CPPUNIT_ASSERT (node.get_property ("warp-markers", prop));
+	CPPUNIT_ASSERT_EQUAL (warped->warp_map ()->to_string (), prop);
 
 	/* a region built from the same sources, then given the saved state */
 	SourceList srcs;
@@ -320,4 +329,74 @@ WarpRenderTest::regionStateRoundTrip ()
 	CPPUNIT_ASSERT (restored->warp_map ());
 	CPPUNIT_ASSERT (*restored->warp_map () == *warped->warp_map ());
 	CPPUNIT_ASSERT (restored->warp_map_matches ());
+}
+
+void
+WarpRenderTest::legacyChildNodeStillLoads ()
+{
+	/* slice-3 sessions saved the map as a <WarpMap> child node */
+	WarpMap m (_length, _length);
+	CPPUNIT_ASSERT (m.add_marker (_clicks[2], _clicks[2] + ms (40)));
+
+	XMLNode& node (_region->get_state ());
+	node.remove_property ("warp-markers");
+	node.add_child_nocopy (m.get_state ());
+
+	SourceList srcs;
+	srcs.push_back (_region->source (0));
+	std::shared_ptr<AudioRegion> restored = std::dynamic_pointer_cast<AudioRegion> (RegionFactory::create (srcs, node));
+	delete &node;
+
+	CPPUNIT_ASSERT (restored);
+	CPPUNIT_ASSERT (restored->warp_map ());
+	CPPUNIT_ASSERT (*restored->warp_map () == m);
+}
+
+void
+WarpRenderTest::markerEditsAreUndoable ()
+{
+	/* pinning a marker records it without re-rendering; it must go
+	 * through the property-diff undo machinery like any region edit */
+	CPPUNIT_ASSERT (!_region->warp_map ());
+
+	WarpMap m (_region->unstretched_length (), _region->length_samples ());
+	CPPUNIT_ASSERT (m.add_marker_at_source (_clicks[3]));
+
+	_region->clear_changes ();
+	_region->set_warp_map (std::shared_ptr<WarpMap const> (new WarpMap (m)));
+	PBD::StatefulDiffCommand cmd (_region);
+	CPPUNIT_ASSERT (!cmd.empty ());
+
+	cmd.undo ();
+	CPPUNIT_ASSERT (!_region->warp_map ());
+
+	cmd ();
+	CPPUNIT_ASSERT (_region->warp_map ());
+	CPPUNIT_ASSERT (*_region->warp_map () == m);
+
+	/* clearing is a change too */
+	_region->clear_changes ();
+	_region->set_warp_map (std::shared_ptr<WarpMap const> ());
+	CPPUNIT_ASSERT (!_region->warp_map ());
+}
+
+void
+WarpRenderTest::removingLastMarkerUnwarps ()
+{
+	/* found in the GUI: rendering a warped region through a map with no
+	 * markers used to re-apply the region's old warp, because "no key
+	 * frames" also meant "keep the existing warp" */
+	WarpMap m (_length, _length);
+	CPPUNIT_ASSERT (m.add_marker (_clicks[3], _clicks[3] + ms (150)));
+	std::shared_ptr<AudioRegion> warped = render_warp (_region, m);
+	CPPUNIT_ASSERT (warped);
+
+	WarpMap flat (*warped->warp_map ());
+	flat.clear_markers ();
+	std::shared_ptr<AudioRegion> unwarped = render_warp (warped, flat);
+	CPPUNIT_ASSERT (unwarped);
+
+	check_clicks (unwarped, flat);
+	CPPUNIT_ASSERT (unwarped->warp_map ());
+	CPPUNIT_ASSERT (unwarped->warp_map ()->empty ());
 }
