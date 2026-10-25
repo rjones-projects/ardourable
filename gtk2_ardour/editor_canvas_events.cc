@@ -974,6 +974,45 @@ Editor::canvas_feature_line_event (GdkEvent *event, ArdourCanvas::Item* item, Re
 }
 
 bool
+Editor::canvas_warp_marker_event (GdkEvent *event, ArdourCanvas::Item* item, AudioRegionView* rv)
+{
+	bool ret = false;
+
+	switch (event->type) {
+	case GDK_BUTTON_PRESS:
+	case GDK_2BUTTON_PRESS:
+	case GDK_3BUTTON_PRESS:
+		clicked_regionview    = rv;
+		clicked_control_point = 0;
+		clicked_axisview      = &rv->get_time_axis_view ();
+		clicked_routeview     = dynamic_cast<RouteTimeAxisView*> (clicked_axisview);
+		ret = button_press_handler (item, event, WarpMarkerItem);
+		break;
+
+	case GDK_BUTTON_RELEASE:
+		ret = button_release_handler (item, event, WarpMarkerItem);
+		break;
+
+	case GDK_MOTION_NOTIFY:
+		ret = motion_handler (item, event);
+		break;
+
+	case GDK_ENTER_NOTIFY:
+		ret = enter_handler (item, event, WarpMarkerItem);
+		break;
+
+	case GDK_LEAVE_NOTIFY:
+		ret = leave_handler (item, event, WarpMarkerItem);
+		break;
+
+	default:
+		break;
+	}
+
+	return ret;
+}
+
+bool
 Editor::canvas_marker_event (GdkEvent *event, ArdourCanvas::Item* item, ArdourMarker* /*marker*/)
 {
 	return typed_event (item, event, MarkerItem);

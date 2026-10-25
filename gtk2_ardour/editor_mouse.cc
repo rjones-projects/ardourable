@@ -571,6 +571,14 @@ Editor::button_press_handler_1 (ArdourCanvas::Item* item, GdkEvent* event, ItemT
 			}
 		}
 		return true;
+	case WarpMarkerItem:
+		if (Keyboard::modifier_state_equals (event->button.state, Keyboard::TertiaryModifier)) {
+			remove_warp_marker_item (item);
+		} else {
+			_drags->set (new WarpMarkerDrag (*this, item), event, _cursors->time_fx);
+		}
+		return true;
+
 	case SceneMarkerItem:
 		_drags->set (new MarkerDrag (*this, item), event);
 		return true;

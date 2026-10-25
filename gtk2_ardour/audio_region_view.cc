@@ -36,6 +36,7 @@
 #include "ardour/profile.h"
 #include "ardour/region_fx_plugin.h"
 #include "ardour/session.h"
+#include "ardour/warp_map.h"
 
 #include "pbd/memento_command.h"
 
@@ -261,6 +262,8 @@ AudioRegionView::init (bool wfd)
 
 	reset_width_dependent_items (_pixel_width);
 
+	warp_markers_changed ();
+
 	if (fade_in_handle) {
 		fade_in_handle->Event.connect (sigc::bind (sigc::mem_fun (PublicEditor::instance(), &PublicEditor::canvas_fade_in_handle_event), fade_in_handle, this, false));
 	}
@@ -339,6 +342,11 @@ AudioRegionView::region_changed (const PropertyChange& what_changed)
 	}
 	if (what_changed.contains (ARDOUR::Properties::valid_transients)) {
 		transients_changed ();
+	}
+	if (what_changed.contains (ARDOUR::Properties::warp_markers)
+	    || what_changed.contains (ARDOUR::Properties::length)
+	    || what_changed.contains (ARDOUR::Properties::start)) {
+		warp_markers_changed ();
 	}
 }
 
@@ -499,6 +507,8 @@ AudioRegionView::reset_width_dependent_items (double pixel_width)
 
 	reset_fade_shapes ();
 
+	position_warp_markers ();
+
 	/* Update feature lines */
 	AnalysisFeatureList analysis_features;
 	_region->transients (analysis_features);
@@ -616,6 +626,8 @@ AudioRegionView::set_height (gdouble height)
 		(*l).second->set (ArdourCanvas::Duple (pos_x, 2.0),
 				ArdourCanvas::Duple (pos_x, y1));
 	}
+
+	position_warp_markers ();
 
 	if (name_text) {
 		name_text->raise_to_top();
@@ -1935,4 +1947,119 @@ AudioRegionView::make_merger ()
 	return new MergeableLine (_fx_line, std::shared_ptr<AutomationControl>(),
 	                          [this](timepos_t const& t) { return timepos_t (_region->position().distance (t)); },
 	                          nullptr, nullptr);
+}
+
+/* ---- warp markers ------------------------------------------------------ */
+
+namespace {
+/* handle size in device-independent pixels */
+const double warp_handle_half_width = 4.0;
+const double warp_handle_height     = 9.0;
+/* closest two markers (or a marker and a region end) may get on screen */
+const double warp_marker_min_gap    = 3.0;
+} // namespace
+
+void
+AudioRegionView::warp_markers_changed ()
+{
+	std::shared_ptr<ARDOUR::WarpMap const> map;
+	if (audio_region ()->warp_map_matches ()) {
+		map = audio_region ()->warp_map ();
+	}
+
+	size_t const n = map ? map->markers ().size () : 0;
+
+	while (_warp_marker_items.size () < n) {
+		WarpMarkerItems w;
+
+		w.line = new ArdourCanvas::Line (group);
+		CANVAS_DEBUG_NAME (w.line, string_compose ("warp marker line for %1", region ()->name ()));
+		w.line->set_outline_color (UIConfiguration::instance ().color ("region mark"));
+		w.line->set_ignore_events (true);
+
+		w.handle = new ArdourCanvas::Rectangle (group);
+		CANVAS_DEBUG_NAME (w.handle, string_compose ("warp marker handle for %1", region ()->name ()));
+		w.handle->set_fill_color (UIConfiguration::instance ().color ("region mark"));
+		w.handle->set_outline_color (Gtkmm2ext::rgba_to_color (0, 0, 0, 1.0));
+		w.handle->set_data ("regionview", this);
+		w.handle->Event.connect (sigc::bind (sigc::mem_fun (PublicEditor::instance (), &PublicEditor::canvas_warp_marker_event), w.handle, this));
+
+		_warp_marker_items.push_back (w);
+	}
+
+	while (_warp_marker_items.size () > n) {
+		delete _warp_marker_items.back ().line;
+		delete _warp_marker_items.back ().handle;
+		_warp_marker_items.pop_back ();
+	}
+
+	position_warp_markers ();
+}
+
+bool
+AudioRegionView::warp_marker_index (ArdourCanvas::Item const* item, size_t& index) const
+{
+	for (size_t i = 0; i < _warp_marker_items.size (); ++i) {
+		if (_warp_marker_items[i].handle == item) {
+			index = i;
+			return true;
+		}
+	}
+	return false;
+}
+
+double
+AudioRegionView::warp_marker_x (size_t index) const
+{
+	std::shared_ptr<ARDOUR::WarpMap const> map = audio_region ()->warp_map ();
+	if (!map || index >= map->markers ().size ()) {
+		return 0;
+	}
+	/* targets are offsets into what the region plays, from its start */
+	return trackview.editor ().sample_to_pixel (map->markers ()[index].target);
+}
+
+void
+AudioRegionView::warp_marker_x_limits (size_t index, double& min_x, double& max_x) const
+{
+	double const scale = UIConfiguration::instance ().get_ui_scale ();
+	double const gap   = warp_marker_min_gap * scale;
+
+	min_x = (index == 0) ? gap : warp_marker_x (index - 1) + gap;
+	max_x = (index + 1 >= _warp_marker_items.size ()) ? _pixel_width - gap : warp_marker_x (index + 1) - gap;
+}
+
+void
+AudioRegionView::preview_warp_marker (size_t index, double x)
+{
+	position_warp_marker (index, x);
+}
+
+void
+AudioRegionView::position_warp_marker (size_t index, double x)
+{
+	if (index >= _warp_marker_items.size ()) {
+		return;
+	}
+
+	double const scale = UIConfiguration::instance ().get_ui_scale ();
+	double const hw    = warp_handle_half_width * scale;
+	double const hh    = warp_handle_height * scale;
+	double const y1    = _effective_height - 1;
+
+	x = rint (x) + .5; /* crisp 1px line */
+
+	WarpMarkerItems& w (_warp_marker_items[index]);
+	w.line->set (ArdourCanvas::Duple (x, 0), ArdourCanvas::Duple (x, y1));
+	w.handle->set (ArdourCanvas::Rect (x - hw, 0, x + hw, hh));
+	w.line->raise_to_top ();
+	w.handle->raise_to_top ();
+}
+
+void
+AudioRegionView::position_warp_markers ()
+{
+	for (size_t i = 0; i < _warp_marker_items.size (); ++i) {
+		position_warp_marker (i, warp_marker_x (i));
+	}
 }

@@ -122,6 +122,21 @@ public:
 	void update_transient(float old_pos, float new_pos);
 	void remove_transient(float pos);
 
+	/* Warp markers: one handle + line per marker in the region's warp
+	 * map, drawn only while the map still matches the audio the region
+	 * reads. */
+	void   warp_markers_changed ();
+	/** Index of the marker whose handle is @p item, if any. */
+	bool   warp_marker_index (ArdourCanvas::Item const* item, size_t& index) const;
+	/** Region-relative x of marker @p index's current (model) position. */
+	double warp_marker_x (size_t index) const;
+	/** Range a dragged marker may move in, keeping it clear of its
+	 * neighbours and the region ends. */
+	void   warp_marker_x_limits (size_t index, double& min_x, double& max_x) const;
+	/** Move marker @p index's items to @p x without touching the model
+	 * (drag feedback). */
+	void   preview_warp_marker (size_t index, double x);
+
 	void     set_frame_color ();
 	uint32_t get_fill_color () const;
 
@@ -172,6 +187,14 @@ protected:
 	std::vector<ArdourWaveView::WaveView *> tmp_waves; ///< see \ref create_waves()
 
 	std::list<std::pair<samplepos_t, ArdourCanvas::Line*> > feature_lines;
+
+	struct WarpMarkerItems {
+		ArdourCanvas::Line*      line;
+		ArdourCanvas::Rectangle* handle;
+	};
+	std::vector<WarpMarkerItems> _warp_marker_items;
+	void position_warp_marker (size_t index, double x);
+	void position_warp_markers ();
 
 	ArdourCanvas::Rectangle*        fade_in_handle; ///< fade in handle, or 0
 	ArdourCanvas::Rectangle*        fade_out_handle; ///< fade out handle, or 0

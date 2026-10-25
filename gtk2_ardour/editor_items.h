@@ -71,6 +71,7 @@ enum ItemType {
 	VelocityBaseItem,
 	ClipStartItem,
 	ClipEndItem,
+	WarpMarkerItem,
 
 	/* don't remove this */
 

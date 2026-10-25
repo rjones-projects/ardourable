@@ -119,6 +119,7 @@ Editor::register_actions ()
 	ActionManager::register_action (editor_menu_actions, X_("RegionMenuPosition"), _("Position"));
 	ActionManager::register_action (editor_menu_actions, X_("RegionMenuMarkers"), _("Markers"));
 	ActionManager::register_action (editor_menu_actions, X_("RegionMenuEdit"), _("Edit"));
+	ActionManager::register_action (editor_menu_actions, X_("RegionMenuWarp"), _("Warp"));
 	ActionManager::register_action (editor_menu_actions, X_("RegionMenuTrim"), _("Trim"));
 	ActionManager::register_action (editor_menu_actions, X_("RegionMenuGain"), _("Gain"));
 	ActionManager::register_action (editor_menu_actions, X_("RegionMenuRanges"), _("Ranges"));
@@ -1356,6 +1357,9 @@ Editor::register_region_actions ()
 
 	/* Reverse selected regions */
 	register_region_action (_region_actions, RegionActionTarget (SelectedRegions|EnteredRegions), "reverse-region", _("Reverse"), sigc::mem_fun (*this, &Editor::reverse_region));
+	register_region_action (_region_actions, RegionActionTarget (SelectedRegions|EnteredRegions), "add-warp-marker", _("Add Warp Marker"), sigc::mem_fun (*this, &Editor::add_warp_marker));
+	register_region_action (_region_actions, RegionActionTarget (SelectedRegions|EnteredRegions), "remove-warp-marker", _("Remove Nearest Warp Marker"), sigc::mem_fun (*this, &Editor::remove_warp_marker));
+	register_region_action (_region_actions, RegionActionTarget (SelectedRegions|EnteredRegions), "clear-warp-markers", _("Clear Warp Markers"), sigc::mem_fun (*this, &Editor::clear_warp_markers));
 
 	/* Split selected multi-channel regions into mono regions */
 	register_region_action (_region_actions, RegionActionTarget (SelectedRegions|EnteredRegions), "split-multichannel-region", _("Make Mono Regions"), sigc::mem_fun (*this, &Editor::split_multichannel_region));

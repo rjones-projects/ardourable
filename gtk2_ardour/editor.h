@@ -89,6 +89,7 @@ namespace Evoral {
 }
 
 namespace ARDOUR {
+	class WarpMap;
 	class AudioPlaylist;
 	class AudioRegion;
 	class AudioTrack;
@@ -1175,6 +1176,20 @@ private:
 	void audition_playlist_region_standalone (std::shared_ptr<ARDOUR::Region>);
 	void split_multichannel_region();
 	void reverse_region ();
+
+	/* warp markers (editor_ops.cc) */
+	void add_warp_marker ();
+	void remove_warp_marker ();
+	void clear_warp_markers ();
+	void remove_warp_marker_item (ArdourCanvas::Item*);
+
+	typedef std::vector<std::pair<std::shared_ptr<ARDOUR::AudioRegion>, ARDOUR::WarpMap> > WarpEdits;
+	/** Re-render each region through its map and swap the results into
+	 * their playlists as one undoable step. Renders everything first, so
+	 * nothing changes if any render fails. Region views of the edited
+	 * regions are replaced, so callers must not use them afterwards. */
+	bool apply_warp_maps (WarpEdits const&, std::string const& command_name);
+	friend class WarpMarkerDrag;
 	void strip_region_silence ();
 	void normalize_region ();
 	void adjust_region_gain (bool up);
@@ -1506,6 +1521,7 @@ private:
 	bool canvas_region_view_name_highlight_event (GdkEvent* event,ArdourCanvas::Item*, RegionView*);
 	bool canvas_region_view_name_event (GdkEvent* event,ArdourCanvas::Item*, RegionView*);
 	bool canvas_feature_line_event (GdkEvent* event, ArdourCanvas::Item*, RegionView*);
+	bool canvas_warp_marker_event (GdkEvent* event, ArdourCanvas::Item*, AudioRegionView*);
 	bool canvas_stream_view_event (GdkEvent* event,ArdourCanvas::Item*, RouteTimeAxisView*);
 	bool canvas_marker_event (GdkEvent* event,ArdourCanvas::Item*, ArdourMarker*);
 	bool canvas_tempo_marker_event (GdkEvent* event,ArdourCanvas::Item*, TempoMarker*);

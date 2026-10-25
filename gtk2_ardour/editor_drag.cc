@@ -50,6 +50,7 @@
 #include "ardour/profile.h"
 #include "ardour/region_factory.h"
 #include "ardour/session.h"
+#include "ardour/warp_map.h"
 #include "ardour/session_playlists.h"
 
 #include "canvas/canvas.h"
@@ -5194,6 +5195,101 @@ void
 FeatureLineDrag::aborted (bool)
 {
 	//_line->reset ();
+}
+
+WarpMarkerDrag::WarpMarkerDrag (Editor& e, ArdourCanvas::Item* i)
+	: Drag (e, i, e.time_domain (), e.get_trackview_group ())
+	, _editor (e)
+	, _arv (reinterpret_cast<AudioRegionView*> (i->get_data ("regionview")))
+	, _index (0)
+	, _valid (false)
+	, _grab_x (0)
+	, _offset (0)
+	, _x (0)
+	, _min_x (0)
+	, _max_x (0)
+{
+	DEBUG_TRACE (DEBUG::Drags, "New WarpMarkerDrag\n");
+	_valid = _arv && _arv->warp_marker_index (i, _index);
+}
+
+void
+WarpMarkerDrag::start_grab (GdkEvent* event, Gdk::Cursor* cursor)
+{
+	Drag::start_grab (event, cursor);
+
+	if (!_valid) {
+		return;
+	}
+
+	/* pointer x in the region's own coordinates */
+	double cx = event->button.x;
+	double cy = event->button.y;
+	_item->parent ()->canvas_to_item (cx, cy);
+
+	_grab_x = _arv->warp_marker_x (_index);
+	_offset = cx - _grab_x;
+	_x      = _grab_x;
+	_arv->warp_marker_x_limits (_index, _min_x, _max_x);
+}
+
+void
+WarpMarkerDrag::motion (GdkEvent* event, bool)
+{
+	if (!_valid) {
+		return;
+	}
+
+	double cx = current_pointer_x ();
+	double cy = 0;
+	_item->parent ()->canvas_to_item (cx, cy);
+
+	_x = std::max (_min_x, std::min (_max_x, cx - _offset));
+	_arv->preview_warp_marker (_index, _x);
+
+	/* show where the marker's audio will land, relative to the region */
+	timepos_t const at (_arv->region ()->position () + timecnt_t (editing_context.pixel_to_sample (_x)));
+	show_verbose_cursor_time (at);
+}
+
+void
+WarpMarkerDrag::finished (GdkEvent*, bool movement_occurred)
+{
+	if (!_valid || !movement_occurred || _x == _grab_x) {
+		if (_valid) {
+			_arv->preview_warp_marker (_index, _grab_x);
+		}
+		return;
+	}
+
+	std::shared_ptr<ARDOUR::AudioRegion> ar = _arv->audio_region ();
+	std::shared_ptr<ARDOUR::WarpMap const> current = ar->warp_map ();
+	if (!current || _index >= current->markers ().size ()) {
+		return;
+	}
+
+	ARDOUR::WarpMap map (*current);
+	samplecnt_t const source = current->markers ()[_index].source;
+	samplecnt_t const target = editing_context.pixel_to_sample (_x);
+
+	if (!map.move_marker (source, target)) {
+		/* pixel rounding put it on a neighbour: leave it where it was */
+		_arv->preview_warp_marker (_index, _grab_x);
+		return;
+	}
+
+	/* _arv is gone once the re-rendered region replaces it */
+	Editor::WarpEdits edits;
+	edits.push_back (std::make_pair (ar, map));
+	_editor.apply_warp_maps (edits, _("move warp marker"));
+}
+
+void
+WarpMarkerDrag::aborted (bool)
+{
+	if (_valid) {
+		_arv->preview_warp_marker (_index, _grab_x);
+	}
 }
 
 RubberbandSelectDrag::RubberbandSelectDrag (EditingContext& ec, ArdourCanvas::Item* i, std::function<bool(GdkEvent*,timepos_t const &)> cf)

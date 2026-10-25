@@ -83,6 +83,8 @@
 #include "ardour/transpose.h"
 #include "ardour/triggerbox.h"
 #include "ardour/vca_manager.h"
+#include "ardour/warp_render.h"
+#include "ardour/warp_map.h"
 
 #include "actions.h"
 #include "ardour_message.h"
@@ -5766,6 +5768,213 @@ Editor::reverse_region ()
 
 	Reverse rev (*_session);
 	apply_filter (rev, _("reverse regions"));
+}
+
+/* ---- warp markers ------------------------------------------------------ */
+
+namespace {
+
+/** The region's own markers if they still describe its audio, otherwise
+ * a marker-less map matching what it plays now. */
+WarpMap
+editable_warp_map (std::shared_ptr<AudioRegion> ar)
+{
+	if (ar->warp_map_matches ()) {
+		return *ar->warp_map ();
+	}
+	return WarpMap (ar->unstretched_length (), ar->length_samples ());
+}
+
+/** Edit position relative to @p ar's start, or -1 if outside it. */
+samplecnt_t
+offset_in_region (std::shared_ptr<AudioRegion> ar, timepos_t const& where)
+{
+	if (where <= ar->position ()) {
+		return -1;
+	}
+	samplecnt_t const t = ar->position ().distance (where).samples ();
+	return t < ar->length_samples () ? t : -1;
+}
+
+} // namespace
+
+void
+Editor::add_warp_marker ()
+{
+	if (!_session) {
+		return;
+	}
+
+	/* pinning a marker where the audio already is changes nothing
+	 * audible, so it's only recorded: no re-render */
+	timepos_t const where = get_preferred_edit_position (EDIT_IGNORE_NONE, true);
+	RegionSelection rs    = get_regions_from_selection_and_entered ();
+	bool in_command       = false;
+
+	for (RegionSelection::iterator r = rs.begin (); r != rs.end (); ++r) {
+		AudioRegionView* arv = dynamic_cast<AudioRegionView*> (*r);
+		if (!arv) {
+			continue;
+		}
+		std::shared_ptr<AudioRegion> ar = arv->audio_region ();
+		samplecnt_t const t = offset_in_region (ar, where);
+		if (t < 0) {
+			continue;
+		}
+
+		WarpMap map = editable_warp_map (ar);
+		if (!map.add_marker (map.target_to_source (t), t)) {
+			continue; /* on top of an existing marker */
+		}
+
+		ar->clear_changes ();
+		ar->set_warp_map (std::shared_ptr<WarpMap const> (new WarpMap (map)));
+
+		if (!in_command) {
+			begin_reversible_command (_("add warp marker"));
+			in_command = true;
+		}
+		_session->add_command (new StatefulDiffCommand (ar));
+	}
+
+	if (in_command) {
+		commit_reversible_command ();
+	}
+}
+
+void
+Editor::remove_warp_marker ()
+{
+	if (!_session) {
+		return;
+	}
+
+	timepos_t const where = get_preferred_edit_position (EDIT_IGNORE_NONE, true);
+	RegionSelection rs    = get_regions_from_selection_and_entered ();
+	WarpEdits       edits;
+
+	for (RegionSelection::iterator r = rs.begin (); r != rs.end (); ++r) {
+		AudioRegionView* arv = dynamic_cast<AudioRegionView*> (*r);
+		if (!arv || !arv->audio_region ()->warp_map_matches ()) {
+			continue;
+		}
+		std::shared_ptr<AudioRegion> ar = arv->audio_region ();
+		samplecnt_t const t = offset_in_region (ar, where);
+		WarpMap map = *ar->warp_map ();
+		if (t < 0 || map.empty ()) {
+			continue;
+		}
+
+		/* the marker nearest the edit point */
+		WarpMap::Markers::const_iterator nearest = map.markers ().begin ();
+		for (WarpMap::Markers::const_iterator m = map.markers ().begin (); m != map.markers ().end (); ++m) {
+			if (std::abs (m->target - t) < std::abs (nearest->target - t)) {
+				nearest = m;
+			}
+		}
+		map.remove_marker (nearest->source);
+		edits.push_back (std::make_pair (ar, map));
+	}
+
+	apply_warp_maps (edits, _("remove warp marker"));
+}
+
+void
+Editor::remove_warp_marker_item (ArdourCanvas::Item* item)
+{
+	AudioRegionView* arv = reinterpret_cast<AudioRegionView*> (item->get_data ("regionview"));
+	size_t           index;
+
+	if (!arv || !arv->warp_marker_index (item, index) || !arv->audio_region ()->warp_map_matches ()) {
+		return;
+	}
+
+	std::shared_ptr<AudioRegion> ar = arv->audio_region ();
+	WarpMap map = *ar->warp_map ();
+	if (index >= map.markers ().size ()) {
+		return;
+	}
+	map.remove_marker (map.markers ()[index].source);
+
+	WarpEdits edits;
+	edits.push_back (std::make_pair (ar, map));
+	apply_warp_maps (edits, _("remove warp marker"));
+}
+
+void
+Editor::clear_warp_markers ()
+{
+	if (!_session) {
+		return;
+	}
+
+	RegionSelection rs = get_regions_from_selection_and_entered ();
+	WarpEdits       edits;
+
+	for (RegionSelection::iterator r = rs.begin (); r != rs.end (); ++r) {
+		AudioRegionView* arv = dynamic_cast<AudioRegionView*> (*r);
+		if (!arv || !arv->audio_region ()->warp_map_matches ()) {
+			continue;
+		}
+		WarpMap map = *arv->audio_region ()->warp_map ();
+		if (map.empty ()) {
+			continue;
+		}
+		/* same overall length, evenly stretched */
+		map.clear_markers ();
+		edits.push_back (std::make_pair (arv->audio_region (), map));
+	}
+
+	apply_warp_maps (edits, _("clear warp markers"));
+}
+
+bool
+Editor::apply_warp_maps (WarpEdits const& edits, std::string const& command_name)
+{
+	if (!_session || edits.empty ()) {
+		return false;
+	}
+
+	/* render everything before touching any playlist */
+	std::vector<std::pair<std::shared_ptr<AudioRegion>, std::shared_ptr<AudioRegion> > > rendered;
+
+	for (WarpEdits::const_iterator e = edits.begin (); e != edits.end (); ++e) {
+		std::shared_ptr<AudioRegion> nr = render_warp (e->first, e->second);
+		if (!nr) {
+			error << string_compose (_("Could not warp region \"%1\""), e->first->name ()) << endmsg;
+			for (auto const& done : rendered) {
+				RegionFactory::map_remove (done.second);
+			}
+			return false;
+		}
+		rendered.push_back (std::make_pair (e->first, nr));
+	}
+
+	begin_reversible_command (command_name);
+
+	std::set<std::shared_ptr<Playlist> > touched;
+
+	for (auto const& r : rendered) {
+		std::shared_ptr<Playlist> pl = r.first->playlist ();
+		if (!pl) {
+			continue;
+		}
+		if (touched.insert (pl).second) {
+			pl->clear_changes ();
+			pl->clear_owned_changes ();
+		}
+		pl->replace_region (r.first, r.second, r.first->position ());
+	}
+
+	for (auto const& pl : touched) {
+		std::vector<Command*> cmds;
+		pl->rdiff (cmds);
+		_session->add_commands (cmds);
+		_session->add_command (new StatefulDiffCommand (pl));
+	}
+
+	commit_reversible_command ();
+	return true;
 }
 
 void

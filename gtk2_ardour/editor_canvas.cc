@@ -1380,6 +1380,9 @@ Editor::which_canvas_cursor(ItemType type) const
 		case FeatureLineItem:
 			cursor = _cursors->cross_hair;
 			break;
+		case WarpMarkerItem:
+			cursor = _cursors->time_fx;
+			break;
 		case LeftFrameHandle:
 			if (effective_mouse_mode() == MouseObject) {// (smart mode): if the user is in the btm half, show the trim cursor
 				cursor = which_trim_cursor (true);
@@ -1630,6 +1633,15 @@ Editor::enter_handler (ArdourCanvas::Item* item, GdkEvent* event, ItemType item_
 	}
 	break;
 
+	case WarpMarkerItem:
+	{
+		ArdourCanvas::Rectangle *rect = dynamic_cast<ArdourCanvas::Rectangle *> (item);
+		if (rect) {
+			rect->set_fill_color (UIConfiguration::instance().color ("entered marker"));
+		}
+	}
+	break;
+
 	case SelectionItem:
 		break;
 
@@ -1739,6 +1751,15 @@ Editor::leave_handler (ArdourCanvas::Item* item, GdkEvent*, ItemType item_type)
 	{
 		ArdourCanvas::Line *line = dynamic_cast<ArdourCanvas::Line *> (item);
 		line->set_outline_color (UIConfiguration::instance().color ("zero line"));
+	}
+	break;
+
+	case WarpMarkerItem:
+	{
+		ArdourCanvas::Rectangle *rect = dynamic_cast<ArdourCanvas::Rectangle *> (item);
+		if (rect) {
+			rect->set_fill_color (UIConfiguration::instance().color ("region mark"));
+		}
 	}
 	break;
 

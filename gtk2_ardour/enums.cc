@@ -180,6 +180,7 @@ setup_gtk_ardour_enums ()
 	REGISTER_ENUM (FadeOutHandleItem);
 	REGISTER_ENUM (NoteItem);
 	REGISTER_ENUM (FeatureLineItem);
+	REGISTER_ENUM (WarpMarkerItem);
 	REGISTER_ENUM (LeftFrameHandle);
 	REGISTER_ENUM (RightFrameHandle);
 	REGISTER_ENUM (StartCrossFadeItem);

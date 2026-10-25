@@ -1307,6 +1307,33 @@ private:
 	uint32_t _max_x;
 };
 
+/** Dragging a warp marker's handle along its region. The audio is only
+ * re-rendered on release, as one undoable step. */
+class WarpMarkerDrag : public Drag
+{
+public:
+	WarpMarkerDrag (Editor&, ArdourCanvas::Item*);
+
+	void start_grab (GdkEvent*, Gdk::Cursor* c = 0);
+	void motion (GdkEvent*, bool);
+	void finished (GdkEvent*, bool);
+	void aborted (bool);
+
+	bool y_movement_matters () const { return false; }
+	bool allow_vertical_autoscroll () const { return false; }
+
+private:
+	Editor&          _editor;
+	AudioRegionView* _arv;
+	size_t           _index;
+	bool             _valid;
+	double           _grab_x;   ///< region-relative x of the handle at grab
+	double           _offset;   ///< pointer x minus handle x at grab
+	double           _x;        ///< current region-relative x
+	double           _min_x;
+	double           _max_x;
+};
+
 /** Dragging of a rubberband rectangle for selecting things */
 class RubberbandSelectDrag : public Drag
 {

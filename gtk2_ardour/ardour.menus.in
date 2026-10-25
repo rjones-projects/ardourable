@@ -403,6 +403,11 @@
         <menuitem action='strip-region-silence'/>
         <menuitem action='reverse-region'/>
       </menu>
+      <menu action='RegionMenuWarp'>
+        <menuitem action='add-warp-marker'/>
+        <menuitem action='remove-warp-marker'/>
+        <menuitem action='clear-warp-markers'/>
+      </menu>
       <menu action='RegionMenuLayering'>
         <menuitem action='raise-region-to-top'/>
         <menuitem action='raise-region'/>
@@ -940,6 +945,11 @@
       <menuitem action='show-rhythm-ferret'/>
       <menuitem action='strip-region-silence'/>
       <menuitem action='reverse-region'/>
+    </menu>
+    <menu action='RegionMenuWarp'>
+      <menuitem action='add-warp-marker'/>
+      <menuitem action='remove-warp-marker'/>
+      <menuitem action='clear-warp-markers'/>
     </menu>
     <menu action='RegionMenuMIDI'>
       <menuitem action='transpose-region'/>
