@@ -1,6 +1,6 @@
 # Drum Rack and Warp Markers for Ardour — design
 
-Status: slices 1–3 done (core models, working `DrumRack`, warp rendering on audio regions; all scriptable from Lua, no GUI yet)
+Status: slices 1–4a done (core models, working `DrumRack`, warp rendering on audio regions, warp-marker editing in the editor; Drum Rack has no GUI yet)
 Base: Ardour `master` after 9.8 (`9.8-241-gfd4ef0523b`)
 Branch: `feature/drum-rack-warp-markers`
 
@@ -185,8 +185,12 @@ after the first call to process()"; the overall ratio still comes from
   existing `ancestral_start`/`stretch` bookkeeping in `RBEffect::run()`, so
   re-warping a warped region doesn't stack artefacts. A test re-warps a warped
   region and checks the clicks follow only the second map.
-- The result carries its `WarpMap` (`AudioRegion::warp_map()`), saved as a
-  `WarpMap` child of the region's XML node.
+- The result carries its `WarpMap` (`AudioRegion::warp_map()`), stored as the
+  region property `warp-markers` (`WarpMap::to_string()`, e.g.
+  `"192000 192000 28800 38400"`). Being an ordinary `PBD::Property`, marker
+  edits that don't re-render (adding a pin) are undoable and saved in the undo
+  history like any region edit. Sessions from slice 3, which saved a `<WarpMap>`
+  child node, still load.
 - **Ordinary stretches keep the warp.** `RBEffect::run()` re-renders from the
   original audio, so before this change stretching (or pitch-shifting) a warped
   region with the existing tool would silently flatten it. Now, if the request
@@ -231,18 +235,51 @@ Known limitations:
   segment ratio, but ~7 ms early at 2.2×. A warped segment behaves the same as a
   uniform stretch at its ratio, so this is the stretcher, not the key-frame map.
 
-### 3.4 Next slices
+### 3.4 Editing in the editor (slice 4a, implemented)
+
+The look is Ardour's own (theme colours `region mark` / `entered marker`);
+only the behaviour follows Live's warp markers.
+
+- **Display.** Each marker is a thin line across the region with a small handle
+  at the top, drawn by `AudioRegionView` at the marker's target position. They
+  follow zoom, height and region changes, and are hidden when the map no longer
+  matches the region (e.g. after a trim).
+- **Add.** Region context menu (and the main Region menu) → **Warp → Add Warp
+  Marker** pins a marker at the edit point (the mouse, by default) where the
+  audio already is. Nothing is re-rendered; it's an undoable property change.
+- **Move.** Drag a handle. The line follows the pointer, kept a few pixels clear
+  of its neighbours and the region ends, with the time shown in the verbose
+  cursor. On release the region is re-rendered and swapped into the playlist as
+  one undo step ("move warp marker").
+- **Remove.** Shift-click a handle (Ardour's Tertiary modifier; same as removing
+  a transient line), or **Warp → Remove Nearest Warp Marker**. Re-renders.
+- **Clear.** **Warp → Clear Warp Markers** re-renders the region as an even
+  stretch over the same length.
+- Several selected regions are handled together: all renders happen first, and
+  only if every one succeeds are the playlists changed, in a single undo step.
+
+Rendering is synchronous on the GUI thread. For loops and phrases it's quick;
+for long regions the editor will pause while it renders (see 3.6).
+
+Checked by running the built Ardour under Xvfb on a session with a click-track
+region (screenshots taken at each step): markers drawn at the right positions,
+hover highlight, drag feedback, re-render on release, undo/redo of a move, Add
+via the menu, Shift-click removal, Clear, and markers restored on session
+reload. That run found a real bug: rendering through a map with no markers
+re-applied the region's previous warp, because RBEffect read "no key frames" as
+"keep the existing warp". `TimeFXRequest::explicit_key_frames` now marks a
+complete map, and `removingLastMarkerUnwarps` covers it.
+
+### 3.5 Next slices
 
 1. **Musical time.** Store marker targets in beats (`Temporal::Beats`) rather than
    samples, so a tempo change re-renders correctly. Regions already carry a
    position time domain (`Region::position_time_domain()`), which this can follow.
-2. **Editor UI.** Markers drawn on the region's waveform; drag to move, double-click
-   to add, a "warp" edit mode alongside the existing stretch tool.
-3. **Clips.** Add `WarpMap` to `AudioTrigger`; in `AudioTrigger::run()`, call
+2. **Clips.** Add `WarpMap` to `AudioTrigger`; in `AudioTrigger::run()`, call
    `setTimeRatio()` per segment as the read position crosses each marker.
-4. **Auto-warp.** Seed markers from `TransientDetector`/aubio onsets.
+3. **Auto-warp.** Seed markers from `TransientDetector`/aubio onsets.
 
-### 3.5 Constraints and open questions
+### 3.6 Constraints and open questions
 
 - RubberBand wants "a reasonable gap" between key frames. The UI should enforce a
   minimum marker spacing (tens of milliseconds); `WarpMap` itself only enforces
@@ -250,9 +287,10 @@ Known limitations:
 - StaffPad and SoundTouch don't take key frames. When those algorithms are
   selected with warp markers present, the fallback is to stretch per segment and
   concatenate, at the cost of possible seams at marker boundaries.
-- Re-render on every marker drag is too slow for long regions. Render in the
-  background and show the old render until it finishes, or render only the
-  affected segments.
+- Rendering happens on release, on the GUI thread. For long regions it should
+  move to a worker thread with progress (as `Editor::time_fx` does), or render
+  only the segments either side of the moved marker.
+- The drag gives no audio preview; you hear the result after release.
 
 ## 4. Delivery plan
 
@@ -261,21 +299,24 @@ Known limitations:
 | 1 | `DrumPadRouter` + `WarpMap` + RubberBand key-frame hook + unit tests | Done |
 | 2 | `DrumRack` processor hosting per-pad plugins, mixing to stereo, session state, Lua API | Done |
 | 3 | `AudioRegion` warp persistence + re-render, Lua API | Done |
-| 4 | Drum Rack pad-grid UI; warp markers on waveform | Later |
+| 4a | Warp markers in the editor: draw, add, drag, remove, clear, undo | Done |
+| 4b | Drum Rack pad-grid UI | Next |
 | 5 | Warp in clip launcher; Push 2 pad mapping; per-pad outputs | Later |
 
 ## 5. Testing
 
 - Unit tests (cppunit), all part of the combined `run-tests` program and, with
   `--single-tests`, also built on their own:
-  - `warp_map_test.cc` (11): mapping, validation, key frames, state.
+  - `warp_map_test.cc` (13): mapping, validation, key frames, XML and string state.
   - `drum_pad_router_test.cc` (13): routing, choke, flush, voice hand-over.
-  - `warp_render_test.cc` (7): renders a click track (2 ms bursts every
+  - `warp_render_test.cc` (10): renders a click track (2 ms bursts every
     500 ms) through `render_warp()` and checks each click's peak lands within
     5 ms of where the map says: uniform map, two moved markers, re-warp from
     the original audio, warp kept through a plain 1.25× stretch, mismatched
-    map rejected, copies vs splits, region XML round trip. Disabling the
-    stretch carry-over makes the 1.25× test fail by ~13 ms.
+    map rejected, copies vs splits, region XML round trip, slice-3 XML still
+    loading, marker edits undoable through `StatefulDiffCommand`, and removing
+    the last marker unwarping the audio. Disabling the stretch carry-over makes
+    the 1.25× test fail by ~13 ms.
   - `drum_rack_test.cc` (11): runs a real `DrumRack` with ACE Reasonable Synth
     (bundled, `libs/plugins/reasonablesynth.lv2`) on each pad in a dummy-backend
     session and checks the rendered audio: note routing, pad gain, choke (and a
